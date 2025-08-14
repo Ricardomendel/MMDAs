@@ -47,7 +47,7 @@ A comprehensive cloud-based revenue management system for Metropolitan, Municipa
 ### Installation
 
 1. **Clone the repository**
-   ```bash
+```bash
    git clone <your-repo-url>
    cd cloud-revenue-mobilization-system
    ```
@@ -65,8 +65,8 @@ A comprehensive cloud-based revenue management system for Metropolitan, Municipa
 
 4. **Start Development**
    ```bash
-   npm run dev
-   ```
+npm run dev
+```
 
    This will start both frontend (port 3000) and backend (port 5000)
 

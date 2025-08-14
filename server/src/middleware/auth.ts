@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { db } from '../config/database';
+import { db, mockDb } from '../config/database';
 import { getSession } from '../config/redis';
 import { logger } from '../utils/logger';
 
@@ -44,10 +44,16 @@ export const authMiddleware = async (
     }
 
     // Check if user exists and is active
-    const user = await db('users')
-      .select('id', 'email', 'role', 'status', 'mmda_id')
-      .where('id', decoded.id)
-      .first();
+    let user;
+    try {
+      user = await db('users')
+        .select('id', 'email', 'role', 'status', 'mmda_id')
+        .where('id', decoded.id)
+        .first();
+    } catch (dbError) {
+      logger.warn('Database query failed, using mock database:', dbError);
+      user = mockDb.users.where('id', decoded.id).first();
+    }
 
     if (!user) {
       res.status(401).json({

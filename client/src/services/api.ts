@@ -157,33 +157,14 @@ export const revenueAPI = {
     api.get(`/revenue/categories/${id}`),
 };
 
+// Payment API methods
 export const paymentAPI = {
-  getPayments: (params?: any) =>
-    api.get('/payments', { params }),
-    
-  getPayment: (id: string) =>
-    api.get(`/payments/${id}`),
-    
-  createPayment: (data: any) =>
-    api.post('/payments', data),
-    
-  updatePayment: (id: string, data: any) =>
-    api.put(`/payments/${id}`, data),
-    
-  deletePayment: (id: string) =>
-    api.delete(`/payments/${id}`),
-    
-  initiatePayment: (assessmentId: string, data: any) =>
-    api.post(`/payments/initiate/${assessmentId}`, data),
-    
-  verifyPayment: (paymentId: string) =>
-    api.post(`/payments/verify/${paymentId}`),
-    
-  getPaymentMethods: () =>
-    api.get('/payments/methods'),
-    
-  getPaymentHistory: (params?: any) =>
-    api.get('/payments/history', { params }),
+  getPayments: () => api.get('/payments'),
+  getPayment: (id: string) => api.get(`/payments/${id}`),
+  createPayment: (data: any) => api.post('/payments', data),
+  checkPaymentStatus: (id: string) => api.get(`/payments/${id}/status`),
+  cancelPayment: (id: string) => api.post(`/payments/${id}/cancel`),
+  getPaymentMethods: () => api.get('/payments/methods/available'),
 };
 
 export const userAPI = {
@@ -271,6 +252,28 @@ export const adminAPI = {
     
   deleteUser: (id: string) =>
     api.delete(`/admin/users/${id}`),
+    
+  // Revenue management
+  getRevenueCategories: () =>
+    api.get('/admin/revenue-categories'),
+    
+  createRevenueCategory: (data: any) =>
+    api.post('/admin/revenue-categories', data),
+    
+  // Property management
+  getProperties: (params?: any) =>
+    api.get('/admin/properties', { params }),
+    
+  // Activities and notifications
+  getRecentActivities: () =>
+    api.get('/admin/activities'),
+    
+  sendAuthorizationEmail: (data: any) =>
+    api.post('/admin/send-authorization-email', data),
+    
+  // Bulk operations
+  bulkUserOperations: (data: any) =>
+    api.post('/admin/bulk-user-operations', data),
     
   getMMDAs: (params?: any) =>
     api.get('/admin/mmdas', { params }),

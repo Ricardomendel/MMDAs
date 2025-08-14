@@ -95,6 +95,23 @@ export const mockDb = {
         return [0];
       }
     }),
+    select: (...fields: string[]) => ({
+      where: (field: string, value: any) => ({
+        first: () => {
+          const user = mockUsers.find(u => u[field as keyof typeof u] === value);
+          if (user) {
+            const selectedUser: any = {};
+            fields.forEach(field => {
+              if (field in user) {
+                selectedUser[field] = user[field as keyof typeof user];
+              }
+            });
+            return selectedUser;
+          }
+          return null;
+        }
+      })
+    }),
     insert: (data: any) => ({
       returning: (fields: string[]) => {
         const newUser = {
@@ -119,23 +136,6 @@ export const mockDb = {
         });
         return [result];
       }
-    }),
-    select: (...fields: string[]) => ({
-      where: (field: string, value: any) => ({
-        first: () => {
-          const user = mockUsers.find(u => u[field as keyof typeof u] === value);
-          if (user) {
-            const selectedUser: any = {};
-            fields.forEach(field => {
-              if (field in user) {
-                selectedUser[field] = user[field as keyof typeof user];
-              }
-            });
-            return selectedUser;
-          }
-          return null;
-        }
-      })
     })
   }
 };

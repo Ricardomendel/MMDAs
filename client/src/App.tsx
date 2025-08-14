@@ -24,7 +24,14 @@ import {
   DialogContent,
   DialogActions,
   Alert,
-  CircularProgress
+  CircularProgress,
+  Chip,
+  Menu,
+  MenuItem,
+  ListItemSecondaryAction,
+  Divider,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -37,7 +44,13 @@ import {
   Logout as LogoutIcon,
   Menu as MenuIcon,
   Add as AddIcon,
-  Visibility as ViewIcon
+  Visibility as ViewIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Email as EmailIcon,
+  MoreVert as MoreVertIcon,
+  Business as BusinessIcon,
+  Assessment as AssessmentIcon
 } from '@mui/icons-material';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from './store';
@@ -102,10 +115,27 @@ function App() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [activeView, setActiveView] = useState('dashboard');
+  // State for user management
   const [userDialogOpen, setUserDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedUserForMenu, setSelectedUserForMenu] = useState<any>(null);
+
+  // State for admin dashboard
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [revenueCategories, setRevenueCategories] = useState<any[]>([]);
+  const [properties, setProperties] = useState<any[]>([]);
+  const [recentActivities, setRecentActivities] = useState<any[]>([]);
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const [revenueCategoryDialogOpen, setRevenueCategoryDialogOpen] = useState(false);
+  const [newRevenueCategory, setNewRevenueCategory] = useState({
+    name: '',
+    description: '',
+    rate: '',
+    status: 'active'
+  });
 
   // Login form state
   const [loginForm, setLoginForm] = useState({
@@ -123,28 +153,84 @@ function App() {
     role: 'taxpayer'
   });
 
+  // Enhanced throttling mechanism to prevent rapid API calls
+  const [lastApiCall, setLastApiCall] = useState<{ [key: string]: number }>({});
+  const [isThrottled, setIsThrottled] = useState<{ [key: string]: boolean }>({});
+  
+  const throttledApiCall = (key: string, callback: () => void, cooldownMs: number = 2000) => {
+    const now = Date.now();
+    const lastCall = lastApiCall[key] || 0;
+    const throttled = isThrottled[key] || false;
+    
+    if (now - lastCall >= cooldownMs && !throttled) {
+      setIsThrottled(prev => ({ ...prev, [key]: true }));
+      setLastApiCall(prev => ({ ...prev, [key]: now }));
+      
+      // Execute callback
+      callback();
+      
+      // Reset throttle after execution
+      setTimeout(() => {
+        setIsThrottled(prev => ({ ...prev, [key]: false }));
+      }, cooldownMs);
+    }
+  };
+
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogin = async () => {
+    if (isLoggingIn) return; // Prevent multiple simultaneous login attempts
+    
+    setIsLoggingIn(true);
+    try {
+      await dispatch(login(loginForm));
+      if (!error) {
+        setLoginOpen(false);
+        setLoginForm({ email: '', password: '' });
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
   useEffect(() => {
-    if (user) {
+    if (user && !user.id) {
+      // Only fetch profile if user exists but doesn't have an ID (indicating it's a fresh login)
       dispatch(getProfile());
     }
-  }, [user, dispatch]);
+  }, [user?.id, dispatch]);
 
   // Fetch users when user changes or when accessing user management
   useEffect(() => {
     if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'users') {
-      fetchUsers();
+      // Throttle user fetching to prevent rapid calls
+      throttledApiCall('fetchUsers', fetchUsers, 2000);
     }
-  }, [user, activeView]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id, activeView, user?.role]); // eslint-disable-next-line react-hooks/exhaustive-deps
 
-  const handleLogin = async () => {
-    await dispatch(login(loginForm));
-    if (!error) {
-      setLoginOpen(false);
-      setLoginForm({ email: '', password: '' });
+  // Fetch dashboard data when admin dashboard is accessed
+  useEffect(() => {
+    if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'dashboard') {
+      // Add a longer delay to prevent rapid successive calls
+      const timer = setTimeout(() => {
+        // Use a single throttled call for dashboard data
+        throttledApiCall('dashboardData', () => {
+          fetchDashboardStats();
+          fetchRevenueCategories();
+          fetchProperties();
+          fetchRecentActivities();
+        }, 3000); // 3 second cooldown for dashboard data
+      }, 500);
+      
+      return () => clearTimeout(timer);
     }
-  };
+  }, [user?.id, activeView, user?.role]); // eslint-disable-next-line react-hooks/exhaustive-deps
 
   const handleRegister = async () => {
+    if (isRegistering) return; // Prevent multiple simultaneous registration attempts
+    
     // Validate required fields
     if (!registerForm.email || !registerForm.password || !registerForm.firstName || !registerForm.lastName || !registerForm.phone) {
       alert('Please fill in all required fields');
@@ -174,38 +260,147 @@ function App() {
     };
     
     console.log('Sending registration data:', userData);
-    const result = await dispatch(register(userData));
-    
-    // Check if registration was successful
-    if (result.meta.requestStatus === 'fulfilled') {
-      setRegisterOpen(false);
-      setRegisterForm({ email: '', password: '', firstName: '', lastName: '', phone: '', role: 'taxpayer' });
-      alert('Registration successful! Please check your email for verification.');
-    } else {
-      // Show error message
-      console.error('Registration failed:', result.payload);
+    setIsRegistering(true);
+    try {
+      const result = await dispatch(register(userData));
+      
+      // Check if registration was successful
+      if (result.meta.requestStatus === 'fulfilled') {
+        setRegisterOpen(false);
+        setRegisterForm({ email: '', password: '', firstName: '', lastName: '', phone: '', role: 'taxpayer' });
+        alert('Registration successful! Please check your email for verification.');
+      } else {
+        // Show error message
+        console.error('Registration failed:', result.payload);
+      }
+    } finally {
+      setIsRegistering(false);
     }
   };
 
   const handleLogout = () => {
-    dispatch(logout());
-    setActiveView('dashboard');
+    if (isLoggingOut) return; // Prevent multiple simultaneous logout attempts
+    
+    setIsLoggingOut(true);
+    try {
+      dispatch(logout());
+      setActiveView('dashboard');
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   // User management functions
   const fetchUsers = async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
     
-    setLoadingUsers(true);
+    // Prevent multiple simultaneous calls
+    if (loadingUsers) return;
+    
+    throttledApiCall('fetchUsers', async () => {
+      setLoadingUsers(true);
+      try {
+        const response = await adminAPI.getUsers();
+        if (response.data.success) {
+          setUsers(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching users:', error);
+      } finally {
+        setLoadingUsers(false);
+      }
+    });
+  };
+
+  // Dashboard data functions
+  const fetchDashboardStats = async () => {
+    if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
+    
+    // Prevent multiple simultaneous calls
+    if (loadingDashboard) return;
+    
+    throttledApiCall('fetchDashboardStats', async () => {
+      setLoadingDashboard(true);
+      try {
+        const response = await adminAPI.getSystemStats();
+        if (response.data.success) {
+          setDashboardStats(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching dashboard stats:', error);
+      } finally {
+        setLoadingDashboard(false);
+      }
+    });
+  };
+
+  const fetchRevenueCategories = async () => {
+    if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
+    
+    throttledApiCall('fetchRevenueCategories', async () => {
+      try {
+        const response = await adminAPI.getRevenueCategories();
+        if (response.data.success) {
+          setRevenueCategories(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching revenue categories:', error);
+      }
+    });
+  };
+
+  const fetchProperties = async () => {
+    if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
+    
+    throttledApiCall('fetchProperties', async () => {
+      try {
+        const response = await adminAPI.getProperties();
+        if (response.data.success) {
+          setProperties(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching properties:', error);
+      }
+    });
+  };
+
+  const fetchRecentActivities = async () => {
+    if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
+    
+    throttledApiCall('fetchRecentActivities', async () => {
+      try {
+        const response = await adminAPI.getRecentActivities();
+        if (response.data.success) {
+          setRecentActivities(response.data.data);
+        }
+      } catch (error) {
+        console.error('Error fetching recent activities:', error);
+      }
+    });
+  };
+
+  const handleCreateRevenueCategory = async () => {
     try {
-      const response = await adminAPI.getUsers();
+      const response = await adminAPI.createRevenueCategory(newRevenueCategory);
       if (response.data.success) {
-        setUsers(response.data.data);
+        setRevenueCategoryDialogOpen(false);
+        setNewRevenueCategory({ name: '', description: '', rate: '', status: 'active' });
+        fetchRevenueCategories();
       }
     } catch (error) {
-      console.error('Error fetching users:', error);
-    } finally {
-      setLoadingUsers(false);
+      console.error('Error creating revenue category:', error);
+    }
+  };
+
+  const sendAuthorizationEmail = async (userId: number, type: string) => {
+    try {
+      const response = await adminAPI.sendAuthorizationEmail({ userId, type });
+      if (response.data.success) {
+        alert('Authorization email sent successfully!');
+      }
+    } catch (error) {
+      console.error('Error sending authorization email:', error);
+      alert('Failed to send authorization email');
     }
   };
 
@@ -234,27 +429,21 @@ function App() {
       if (response.data.success) {
         setUserDialogOpen(false);
         setEditingUser(null);
-        fetchUsers(); // Refresh the users list
-        // You could add a success notification here
+        fetchUsers();
       }
     } catch (error) {
       console.error('Error updating user:', error);
-      // You could add an error notification here
     }
   };
 
   const handleDeleteUser = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this user?')) {
-      try {
-        const response = await adminAPI.deleteUser(id);
-        if (response.data.success) {
-          fetchUsers(); // Refresh the users list
-          // You could add a success notification here
-        }
-      } catch (error) {
-        console.error('Error deleting user:', error);
-        // You could add an error notification here
+    try {
+      const response = await adminAPI.deleteUser(id);
+      if (response.data.success) {
+        fetchUsers();
       }
+    } catch (error) {
+      console.error('Error deleting user:', error);
     }
   };
 
@@ -274,75 +463,172 @@ function App() {
       <Typography variant="h4" gutterBottom>
         Admin Dashboard
       </Typography>
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6} lg={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Total Revenue
-              </Typography>
-              <Typography variant="h4">
-                ₵ 2,450,000
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={6} lg={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Pending Payments
-              </Typography>
-              <Typography variant="h4">
-                ₵ 180,000
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={6} lg={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Active Users
-              </Typography>
-              <Typography variant="h4">
-                1,250
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={6} lg={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Properties
-              </Typography>
-              <Typography variant="h4">
-                890
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      
+      {loadingDashboard ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Total Revenue
+                  </Typography>
+                  <Typography variant="h4">
+                    ₵ {dashboardStats?.totalRevenue?.toLocaleString() || '0'}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Pending Payments
+                  </Typography>
+                  <Typography variant="h4">
+                    ₵ {dashboardStats?.pendingPayments?.toLocaleString() || '0'}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Active Users
+                  </Typography>
+                  <Typography variant="h4">
+                    {dashboardStats?.activeUsers?.toLocaleString() || '0'}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Properties
+                  </Typography>
+                  <Typography variant="h4">
+                    {dashboardStats?.totalProperties?.toLocaleString() || '0'}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
 
-      <Box sx={{ mt: 4 }}>
-        <Typography variant="h5" gutterBottom>
-          Recent Activities
-        </Typography>
-        <Card>
-          <CardContent>
-            <Typography variant="body2" color="textSecondary">
-              • New property assessment submitted - 2 hours ago
-            </Typography>
-            <Typography variant="body2" color="textSecondary">
-              • Payment received for Property ID: PRP-2024-001 - 4 hours ago
-            </Typography>
-            <Typography variant="body2" color="textSecondary">
-              • User registration: John Doe - 6 hours ago
-            </Typography>
-          </CardContent>
-        </Card>
-      </Box>
+          <Box sx={{ mt: 4 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h5" gutterBottom>
+                Recent Activities
+              </Typography>
+              <Button variant="outlined" onClick={fetchRecentActivities}>
+                Refresh
+              </Button>
+            </Box>
+            <Card>
+              <CardContent>
+                {recentActivities.length === 0 ? (
+                  <Typography variant="body2" color="textSecondary" align="center">
+                    No recent activities
+                  </Typography>
+                ) : (
+                  recentActivities.map((activity, index) => (
+                    <Typography key={index} variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+                      • {activity.message} - {new Date(activity.timestamp).toLocaleString()}
+                    </Typography>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </Box>
+
+          <Box sx={{ mt: 4 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h5" gutterBottom>
+                Revenue Categories
+              </Typography>
+              <Button 
+                variant="contained" 
+                startIcon={<AddIcon />}
+                onClick={() => setRevenueCategoryDialogOpen(true)}
+              >
+                Add Category
+              </Button>
+            </Box>
+            <Grid container spacing={3}>
+              {revenueCategories.map((category) => (
+                <Grid item xs={12} md={6} key={category.id}>
+                  <Card>
+                    <CardContent>
+                      <Typography variant="h6" gutterBottom>
+                        {category.name}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {category.description}
+                      </Typography>
+                      <Typography variant="h5" sx={{ mt: 2 }}>
+                        Rate: ₵{category.rate}
+                      </Typography>
+                      <Chip 
+                        label={category.status} 
+                        color={category.status === 'active' ? 'success' : 'default'}
+                        size="small"
+                        sx={{ mt: 1 }}
+                      />
+                    </CardContent>
+                    <CardActions>
+                      <Button size="small" startIcon={<ViewIcon />}>View Details</Button>
+                      <Button size="small" startIcon={<EditIcon />}>Edit</Button>
+                    </CardActions>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </Box>
+
+          <Box sx={{ mt: 4 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h5" gutterBottom>
+                Recent Properties
+              </Typography>
+              <Button variant="outlined" onClick={fetchProperties}>
+                View All Properties
+              </Button>
+            </Box>
+            <Card>
+              <CardContent>
+                {properties.length === 0 ? (
+                  <Typography variant="body2" color="textSecondary" align="center">
+                    No properties found
+                  </Typography>
+                ) : (
+                  properties.slice(0, 5).map((property) => (
+                    <Box key={property.id} sx={{ mb: 2, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
+                      <Typography variant="subtitle1">
+                        {property.property_id} - {property.address}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        Owner: {property.owner_name}
+                      </Typography>
+                      <Chip 
+                        label={property.status} 
+                        color={property.status === 'active' ? 'success' : 'warning'}
+                        size="small"
+                        sx={{ mt: 1 }}
+                      />
+                    </Box>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </Box>
+        </>
+      )}
     </Box>
   );
 
@@ -600,48 +886,125 @@ function App() {
                   No users found
                 </Typography>
               ) : (
-                <Box>
-                  {users.map((userItem) => (
-                    <Box 
-                      key={userItem.id} 
-                      sx={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        py: 2, 
-                        borderBottom: '1px solid #eee',
-                        '&:last-child': { borderBottom: 'none' }
-                      }}
-                    >
-                      <Box>
-                        <Typography variant="body1">
-                          {userItem.first_name} {userItem.last_name}
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          {userItem.email} • {userItem.role} • {userItem.status}
-                        </Typography>
-                      </Box>
-                      <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Button 
-                          size="small" 
-                          variant="outlined"
-                          onClick={() => openUserDialog(userItem)}
-                        >
-                          Edit
-                        </Button>
-                        <Button 
-                          size="small" 
-                          variant="outlined" 
-                          color="error"
-                          onClick={() => handleDeleteUser(userItem.id)}
-                          disabled={userItem.id === (user?.id || 0)}
-                        >
-                          Delete
-                        </Button>
-                      </Box>
-                    </Box>
+                <List>
+                  {users.map((userItem, index) => (
+                    <React.Fragment key={userItem.id}>
+                      <ListItem>
+                        <ListItemText
+                          primary={`${userItem.first_name} ${userItem.last_name}`}
+                          secondary={
+                            <Box>
+                              <Typography variant="body2" color="textSecondary">
+                                {userItem.email} • {userItem.phone}
+                              </Typography>
+                              <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+                                <Chip 
+                                  label={userItem.role} 
+                                  size="small" 
+                                  color={userItem.role === 'admin' ? 'error' : userItem.role === 'staff' ? 'warning' : 'primary'}
+                                  sx={{ mr: 1 }}
+                                />
+                                <Chip 
+                                  label={userItem.status} 
+                                  size="small" 
+                                  color={userItem.status === 'active' ? 'success' : userItem.status === 'pending' ? 'warning' : 'default'}
+                                />
+                              </Box>
+                            </Box>
+                          }
+                        />
+                        <ListItemSecondaryAction>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <IconButton
+                              size="small"
+                              onClick={() => sendAuthorizationEmail(userItem.id, 'welcome')}
+                              title="Send Welcome Email"
+                            >
+                              <EmailIcon />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setEditingUser(userItem);
+                                setUserDialogOpen(true);
+                              }}
+                              title="Edit User"
+                            >
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={() => {
+                                setUserMenuAnchor(document.getElementById(`user-menu-${userItem.id}`));
+                                setSelectedUserForMenu(userItem);
+                              }}
+                              title="More Actions"
+                            >
+                              <MoreVertIcon />
+                            </IconButton>
+                          </Box>
+                          
+                          {/* User Action Menu */}
+                          <Menu
+                            id={`user-menu-${userItem.id}`}
+                            anchorEl={userMenuAnchor}
+                            open={Boolean(userMenuAnchor) && selectedUserForMenu?.id === userItem.id}
+                            onClose={() => {
+                              setUserMenuAnchor(null);
+                              setSelectedUserForMenu(null);
+                            }}
+                          >
+                            <MenuItem onClick={() => {
+                              sendAuthorizationEmail(userItem.id, 'account_activation');
+                              setUserMenuAnchor(null);
+                              setSelectedUserForMenu(null);
+                            }}>
+                              <EmailIcon sx={{ mr: 1 }} />
+                              Send Activation Email
+                            </MenuItem>
+                            <MenuItem onClick={() => {
+                              sendAuthorizationEmail(userItem.id, 'password_reset');
+                              setUserMenuAnchor(null);
+                              setSelectedUserForMenu(null);
+                            }}>
+                              <EmailIcon sx={{ mr: 1 }} />
+                              Send Password Reset
+                            </MenuItem>
+                            <Divider />
+                            <MenuItem onClick={() => {
+                              // Toggle user status
+                              const newStatus = userItem.status === 'active' ? 'inactive' : 'active';
+                              handleUpdateUser({ ...userItem, status: newStatus }, userItem.id.toString());
+                              setUserMenuAnchor(null);
+                              setSelectedUserForMenu(null);
+                            }}>
+                              <Switch 
+                                checked={userItem.status === 'active'} 
+                                size="small"
+                                sx={{ mr: 1 }}
+                              />
+                              {userItem.status === 'active' ? 'Deactivate' : 'Activate'}
+                            </MenuItem>
+                            <MenuItem 
+                              onClick={() => {
+                                if (window.confirm(`Are you sure you want to delete ${userItem.first_name} ${userItem.last_name}?`)) {
+                                  handleDeleteUser(userItem.id.toString());
+                                }
+                                setUserMenuAnchor(null);
+                                setSelectedUserForMenu(null);
+                              }}
+                              sx={{ color: 'error.main' }}
+                            >
+                              <DeleteIcon sx={{ mr: 1 }} />
+                              Delete User
+                            </MenuItem>
+                          </Menu>
+                        </ListItemSecondaryAction>
+                      </ListItem>
+                      {index < users.length - 1 && <Divider />}
+                    </React.Fragment>
                   ))}
-                </Box>
+                </List>
               )}
             </CardContent>
           </Card>
@@ -650,11 +1013,55 @@ function App() {
     </Box>
   );
 
+  const renderProperties = () => (
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4">
+          Property Management
+        </Typography>
+        <Button variant="contained" startIcon={<AddIcon />}>
+          Add Property
+        </Button>
+      </Box>
+      
+      <Grid container spacing={3}>
+        {properties.map((property) => (
+          <Grid item xs={12} md={6} lg={4} key={property.id}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  {property.property_id}
+                </Typography>
+                <Typography variant="body2" color="textSecondary" gutterBottom>
+                  {property.address}
+                </Typography>
+                <Typography variant="body2" color="textSecondary">
+                  Owner: {property.owner_name}
+                </Typography>
+                <Chip 
+                  label={property.status} 
+                  color={property.status === 'active' ? 'success' : 'warning'}
+                  size="small"
+                  sx={{ mt: 1 }}
+                />
+              </CardContent>
+              <CardActions>
+                <Button size="small" startIcon={<ViewIcon />}>View Details</Button>
+                <Button size="small" startIcon={<EditIcon />}>Edit</Button>
+              </CardActions>
+            </Card>
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+  );
+
   const renderReports = () => (
     <Box>
       <Typography variant="h4" gutterBottom>
         Reports & Analytics
       </Typography>
+      
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
           <Card>
@@ -662,22 +1069,35 @@ function App() {
               <Typography variant="h6" gutterBottom>
                 Revenue Report
               </Typography>
-              <Button variant="contained" fullWidth>
-                Generate Report
-              </Button>
+              <Typography variant="h4" color="primary">
+                ₵ {dashboardStats?.totalRevenue?.toLocaleString() || '0'}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                Total revenue collected
+              </Typography>
             </CardContent>
+            <CardActions>
+              <Button size="small" startIcon={<ViewIcon />}>Generate Report</Button>
+            </CardActions>
           </Card>
         </Grid>
+        
         <Grid item xs={12} md={6}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Payment Analytics
+                User Statistics
               </Typography>
-              <Button variant="contained" fullWidth>
-                View Analytics
-              </Button>
+              <Typography variant="h4" color="secondary">
+                {dashboardStats?.totalUsers || '0'}
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                Total registered users
+              </Typography>
             </CardContent>
+            <CardActions>
+              <Button size="small" startIcon={<ViewIcon />}>View Details</Button>
+            </CardActions>
           </Card>
         </Grid>
       </Grid>
@@ -907,6 +1327,48 @@ function App() {
     </Box>
   );
 
+  const renderSettings = () => (
+    <Box>
+      <Typography variant="h4" gutterBottom>
+        System Settings
+      </Typography>
+      
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Email Configuration
+              </Typography>
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                Configure email settings for user notifications
+              </Typography>
+              <Button variant="outlined" sx={{ mt: 2 }}>
+                Configure Email
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+        
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                System Preferences
+              </Typography>
+              <Typography variant="body2" color="textSecondary" gutterBottom>
+                Manage system-wide preferences and configurations
+              </Typography>
+              <Button variant="outlined" sx={{ mt: 2 }}>
+                Manage Preferences
+              </Button>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    </Box>
+  );
+
   const renderDashboard = () => {
     if (!user) return null;
     
@@ -931,17 +1393,21 @@ function App() {
         return renderPayments();
       case 'users':
         return renderUsers();
+      case 'revenue':
+        return renderRevenueManagement();
       case 'reports':
         if (user?.role === 'taxpayer') {
           return renderTaxpayerHistory();
         }
         return renderReports();
       case 'properties':
-        return renderTaxpayerProperties();
-      case 'history':
-        return renderTaxpayerHistory();
+        return renderProperties();
+      case 'settings':
+        return renderSettings();
       case 'profile':
         return renderTaxpayerProfile();
+      case 'history':
+        return renderTaxpayerHistory();
       default:
         return renderDashboard();
     }
@@ -997,16 +1463,21 @@ function App() {
                              <Typography variant="body2">
                  Welcome, {user.first_name || user.email}
                </Typography>
-              <Button color="inherit" onClick={handleLogout} startIcon={<LogoutIcon />}>
-                Logout
-              </Button>
+              <Button 
+                  color="inherit" 
+                  onClick={handleLogout} 
+                  startIcon={isLoggingOut ? <CircularProgress size={20} color="inherit" /> : <LogoutIcon />}
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? 'Logging out...' : 'Logout'}
+                </Button>
             </Box>
           ) : (
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Button color="inherit" onClick={() => setLoginOpen(true)} startIcon={<LoginIcon />}>
                 Login
               </Button>
-              <Button variant="contained" onClick={() => setRegisterOpen(true)}>
+              <Button variant="contained" onClick={() => setRegisterOpen(true)} disabled={isRegistering}>
                 Register
               </Button>
             </Box>
@@ -1018,20 +1489,48 @@ function App() {
         <Drawer anchor="left" open={drawerOpen} onClose={() => setDrawerOpen(false)}>
           <Box sx={{ width: 250 }} role="presentation">
             <List>
-              {menuItems.map((item) => (
-                <ListItem 
-                  button 
-                  key={item.text}
-                  onClick={() => {
-                    setActiveView(item.view);
-                    setDrawerOpen(false);
-                  }}
-                  selected={activeView === item.view}
-                >
-                  <ListItemIcon>{item.icon}</ListItemIcon>
-                  <ListItemText primary={item.text} />
-                </ListItem>
-              ))}
+              <ListItem button onClick={() => setActiveView('dashboard')}>
+                <ListItemIcon>
+                  <DashboardIcon />
+                </ListItemIcon>
+                <ListItemText primary="Dashboard" />
+              </ListItem>
+              <ListItem button onClick={() => setActiveView('users')}>
+                <ListItemIcon>
+                  <PeopleIcon />
+                </ListItemIcon>
+                <ListItemText primary="User Management" />
+              </ListItem>
+              <ListItem button onClick={() => setActiveView('revenue')}>
+                <ListItemIcon>
+                  <RevenueIcon />
+                </ListItemIcon>
+                <ListItemText primary="Revenue Management" />
+              </ListItem>
+              <ListItem button onClick={() => setActiveView('payments')}>
+                <ListItemIcon>
+                  <PaymentIcon />
+                </ListItemIcon>
+                <ListItemText primary="Payments" />
+              </ListItem>
+              <ListItem button onClick={() => setActiveView('properties')}>
+                <ListItemIcon>
+                  <BusinessIcon />
+                </ListItemIcon>
+                <ListItemText primary="Properties" />
+              </ListItem>
+              <ListItem button onClick={() => setActiveView('reports')}>
+                <ListItemIcon>
+                  <AssessmentIcon />
+                </ListItemIcon>
+                <ListItemText primary="Reports" />
+              </ListItem>
+              <ListItem button onClick={() => setActiveView('settings')}>
+                <ListItemIcon>
+                  <SettingsIcon />
+                </ListItemIcon>
+                <ListItemText primary="Settings" />
+              </ListItem>
             </List>
           </Box>
         </Drawer>
@@ -1079,7 +1578,14 @@ function App() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setLoginOpen(false)}>Cancel</Button>
-          <Button onClick={handleLogin} variant="contained">Login</Button>
+          <Button 
+            onClick={handleLogin} 
+            variant="contained" 
+            disabled={isLoggingIn}
+            startIcon={isLoggingIn ? <CircularProgress size={20} /> : null}
+          >
+            {isLoggingIn ? 'Logging in...' : 'Login'}
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -1147,7 +1653,14 @@ function App() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setRegisterOpen(false)}>Cancel</Button>
-          <Button onClick={handleRegister} variant="contained">Register</Button>
+          <Button 
+            onClick={handleRegister} 
+            variant="contained" 
+            disabled={isRegistering}
+            startIcon={isRegistering ? <CircularProgress size={20} /> : null}
+          >
+            {isRegistering ? 'Registering...' : 'Register'}
+          </Button>
         </DialogActions>
       </Dialog>
 
@@ -1163,6 +1676,64 @@ function App() {
             onCancel={closeUserDialog}
           />
         </DialogContent>
+      </Dialog>
+
+      {/* Revenue Category Dialog */}
+      <Dialog open={revenueCategoryDialogOpen} onClose={() => setRevenueCategoryDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          {newRevenueCategory.name ? 'Edit Revenue Category' : 'Add New Revenue Category'}
+        </DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2}>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="Name"
+                fullWidth
+                variant="outlined"
+                value={newRevenueCategory.name}
+                onChange={(e) => setNewRevenueCategory({ ...newRevenueCategory, name: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                margin="dense"
+                label="Description"
+                fullWidth
+                variant="outlined"
+                value={newRevenueCategory.description}
+                onChange={(e) => setNewRevenueCategory({ ...newRevenueCategory, description: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                margin="dense"
+                label="Rate (₵)"
+                type="number"
+                fullWidth
+                variant="outlined"
+                value={newRevenueCategory.rate}
+                onChange={(e) => setNewRevenueCategory({ ...newRevenueCategory, rate: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                margin="dense"
+                label="Status"
+                fullWidth
+                variant="outlined"
+                value={newRevenueCategory.status}
+                onChange={(e) => setNewRevenueCategory({ ...newRevenueCategory, status: e.target.value })}
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRevenueCategoryDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleCreateRevenueCategory} variant="contained">
+            {newRevenueCategory.name ? 'Update Category' : 'Add Category'}
+          </Button>
+        </DialogActions>
       </Dialog>
     </ThemeProvider>
   );
