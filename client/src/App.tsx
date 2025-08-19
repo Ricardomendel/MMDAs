@@ -31,14 +31,13 @@ import {
   ListItemSecondaryAction,
   Divider,
   Switch,
-  FormControlLabel
+  
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
   AccountBalance as RevenueIcon,
   Payment as PaymentIcon,
   People as PeopleIcon,
-  Assessment as ReportsIcon,
   Settings as SettingsIcon,
   Login as LoginIcon,
   Logout as LogoutIcon,
@@ -1104,68 +1103,7 @@ function App() {
     </Box>
   );
 
-  const renderTaxpayerProperties = () => (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        My Properties
-      </Typography>
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Residential Property
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Address: 123 Main Street, Accra
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Property ID: PRP-2024-001
-              </Typography>
-              <Typography variant="h6" sx={{ mt: 2, color: 'error.main' }}>
-                Outstanding Tax: ₵ 250
-              </Typography>
-            </CardContent>
-            <CardActions>
-              <Button size="small" variant="contained" startIcon={<PaymentIcon />}>
-                Pay Tax
-              </Button>
-              <Button size="small" startIcon={<ViewIcon />}>
-                View Details
-              </Button>
-            </CardActions>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Commercial Property
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Address: 456 Business Ave, Accra
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                Property ID: PRP-2024-002
-              </Typography>
-              <Typography variant="h6" sx={{ mt: 2, color: 'error.main' }}>
-                Outstanding Tax: ₵ 200
-              </Typography>
-            </CardContent>
-            <CardActions>
-              <Button size="small" variant="contained" startIcon={<PaymentIcon />}>
-                Pay Tax
-              </Button>
-              <Button size="small" startIcon={<ViewIcon />}>
-                View Details
-              </Button>
-            </CardActions>
-          </Card>
-        </Grid>
-      </Grid>
-    </Box>
-  );
+  // removed unused renderTaxpayerProperties
 
   const renderTaxpayerPayments = () => (
     <Box>
@@ -1393,8 +1331,6 @@ function App() {
         return renderPayments();
       case 'users':
         return renderUsers();
-      case 'revenue':
-        return renderRevenueManagement();
       case 'reports':
         if (user?.role === 'taxpayer') {
           return renderTaxpayerHistory();
@@ -1413,32 +1349,7 @@ function App() {
     }
   };
 
-  const getMenuItems = () => {
-    if (!user) return [];
-    
-    if (user.role === 'admin' || user.role === 'staff' || user.role === 'super_admin') {
-      // Admin/Staff menu items
-      return [
-        { text: 'Dashboard', icon: <DashboardIcon />, view: 'dashboard' },
-        { text: 'Revenue Management', icon: <RevenueIcon />, view: 'revenue' },
-        { text: 'Payments', icon: <PaymentIcon />, view: 'payments' },
-        { text: 'User Management', icon: <PeopleIcon />, view: 'users' },
-        { text: 'Reports', icon: <ReportsIcon />, view: 'reports' },
-        { text: 'Settings', icon: <SettingsIcon />, view: 'settings' },
-      ];
-    } else {
-      // Taxpayer menu items
-      return [
-        { text: 'Dashboard', icon: <DashboardIcon />, view: 'dashboard' },
-        { text: 'My Properties', icon: <ViewIcon />, view: 'properties' },
-        { text: 'Tax Payments', icon: <PaymentIcon />, view: 'payments' },
-        { text: 'Payment History', icon: <ReportsIcon />, view: 'history' },
-        { text: 'Profile', icon: <SettingsIcon />, view: 'profile' },
-      ];
-    }
-  };
-
-  const menuItems = getMenuItems();
+  
 
   return (
     <ThemeProvider theme={theme}>
