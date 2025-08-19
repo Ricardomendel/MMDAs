@@ -79,7 +79,7 @@ dist
 
 # Gatsby files
 .cache/
-public
+# Do not ignore CRA's client/public; remove global public ignore
 
 # Storybook build outputs
 .out
