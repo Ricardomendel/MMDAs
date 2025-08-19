@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { 
@@ -156,7 +156,7 @@ function App() {
   const [lastApiCall, setLastApiCall] = useState<{ [key: string]: number }>({});
   const [isThrottled, setIsThrottled] = useState<{ [key: string]: boolean }>({});
   
-  const throttledApiCall = (key: string, callback: () => void, cooldownMs: number = 2000) => {
+  const throttledApiCall = useCallback((key: string, callback: () => void, cooldownMs: number = 2000) => {
     const now = Date.now();
     const lastCall = lastApiCall[key] || 0;
     const throttled = isThrottled[key] || false;
@@ -173,7 +173,7 @@ function App() {
         setIsThrottled(prev => ({ ...prev, [key]: false }));
       }, cooldownMs);
     }
-  };
+  }, [lastApiCall, isThrottled]);
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
@@ -199,33 +199,8 @@ function App() {
       // Only fetch profile if user exists but doesn't have an ID (indicating it's a fresh login)
       dispatch(getProfile());
     }
-  }, [user?.id, dispatch]);
-
-  // Fetch users when user changes or when accessing user management
-  useEffect(() => {
-    if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'users') {
-      // Throttle user fetching to prevent rapid calls
-      throttledApiCall('fetchUsers', fetchUsers, 2000);
-    }
-  }, [user?.id, activeView, user?.role]); // eslint-disable-next-line react-hooks/exhaustive-deps
-
-  // Fetch dashboard data when admin dashboard is accessed
-  useEffect(() => {
-    if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'dashboard') {
-      // Add a longer delay to prevent rapid successive calls
-      const timer = setTimeout(() => {
-        // Use a single throttled call for dashboard data
-        throttledApiCall('dashboardData', () => {
-          fetchDashboardStats();
-          fetchRevenueCategories();
-          fetchProperties();
-          fetchRecentActivities();
-        }, 3000); // 3 second cooldown for dashboard data
-      }, 500);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [user?.id, activeView, user?.role]); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, dispatch]);
+  
 
   const handleRegister = async () => {
     if (isRegistering) return; // Prevent multiple simultaneous registration attempts
@@ -290,7 +265,7 @@ function App() {
   };
 
   // User management functions
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
     
     // Prevent multiple simultaneous calls
@@ -309,10 +284,10 @@ function App() {
         setLoadingUsers(false);
       }
     });
-  };
+  }, [user, loadingUsers, throttledApiCall]);
 
   // Dashboard data functions
-  const fetchDashboardStats = async () => {
+  const fetchDashboardStats = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
     
     // Prevent multiple simultaneous calls
@@ -331,9 +306,9 @@ function App() {
         setLoadingDashboard(false);
       }
     });
-  };
+  }, [user, loadingDashboard, throttledApiCall]);
 
-  const fetchRevenueCategories = async () => {
+  const fetchRevenueCategories = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
     
     throttledApiCall('fetchRevenueCategories', async () => {
@@ -346,9 +321,9 @@ function App() {
         console.error('Error fetching revenue categories:', error);
       }
     });
-  };
+  }, [user, throttledApiCall]);
 
-  const fetchProperties = async () => {
+  const fetchProperties = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
     
     throttledApiCall('fetchProperties', async () => {
@@ -361,9 +336,9 @@ function App() {
         console.error('Error fetching properties:', error);
       }
     });
-  };
+  }, [user, throttledApiCall]);
 
-  const fetchRecentActivities = async () => {
+  const fetchRecentActivities = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
     
     throttledApiCall('fetchRecentActivities', async () => {
@@ -376,7 +351,7 @@ function App() {
         console.error('Error fetching recent activities:', error);
       }
     });
-  };
+  }, [user, throttledApiCall]);
 
   const handleCreateRevenueCategory = async () => {
     try {
@@ -416,6 +391,28 @@ function App() {
       // You could add an error notification here
     }
   };
+
+  // Fetch users when user changes or when accessing user management
+  useEffect(() => {
+    if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'users') {
+      throttledApiCall('fetchUsers', () => { fetchUsers(); }, 2000);
+    }
+  }, [user, activeView, throttledApiCall, fetchUsers]);
+
+  // Fetch dashboard data when admin dashboard is accessed
+  useEffect(() => {
+    if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'dashboard') {
+      const timer = setTimeout(() => {
+        throttledApiCall('dashboardData', () => {
+          fetchDashboardStats();
+          fetchRevenueCategories();
+          fetchProperties();
+          fetchRecentActivities();
+        }, 3000);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [user, activeView, throttledApiCall, fetchDashboardStats, fetchRevenueCategories, fetchProperties, fetchRecentActivities]);
 
   const handleUpdateUser = async (userData: any, id?: string) => {
     if (!id) {
