@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import path from 'path';
 
 // Import routes
 import authRoutes from './routes/auth';
@@ -100,6 +101,11 @@ app.use(morgan('combined', {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Serve static files from the React build directory (for production)
+if (process.env['NODE_ENV'] === 'production') {
+  app.use(express.static(path.join(__dirname, '../../client/build')));
+}
+
 // Health check endpoint
 app.get('/health', (_req, res) => {
   res.status(200).json({
@@ -136,14 +142,21 @@ io.on('connection', (socket: any) => {
 // Error handling middleware
 app.use(errorHandler);
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-    path: req.originalUrl
+// Serve React app for client-side routing (must be after API routes)
+if (process.env['NODE_ENV'] === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../../client/build/index.html'));
   });
-});
+} else {
+  // 404 handler for development
+  app.use('*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      message: 'Route not found',
+      path: req.originalUrl
+    });
+  });
+}
 
 // Initialize database and start server
 async function startServer() {
