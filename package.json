@@ -8,6 +8,7 @@
     "server": "cd server && npm run dev",
     "client": "cd client && npm start",
     "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "postinstall": "cd server && npm ci && cd ../client && npm ci",
     "build": "cd server && npm run build && cd ../client && npm run build",
     "test": "npm run test:unit && npm run test:integration && npm run test:e2e",
     "test:unit": "cd server && npm run test:unit && cd ../client && npm run test:unit",
