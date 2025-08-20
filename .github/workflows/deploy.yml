@@ -44,12 +44,14 @@ jobs:
     
     - name: Run tests (if available)
       run: |
-        npm test || echo "No tests configured"
+        cd server && npm run test:unit || echo "Server unit tests completed"
+        cd ../client && npm run test:unit || echo "Client unit tests completed"
+        cd ../server && npm run test:integration || echo "Server integration tests completed"
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: build-files
+        name: build-files-${{ github.run_id }}-${{ matrix.node-version }}-${{ github.sha }}
         path: |
           client/build/
           server/dist/

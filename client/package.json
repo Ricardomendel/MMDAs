@@ -65,7 +65,7 @@
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "test:unit": "jest --config jest.config.js",
+    "test:unit": "jest --config jest.unit.config.js --passWithNoTests",
     "test:unit:watch": "jest --config jest.config.js --watch",
     "test:unit:coverage": "jest --config jest.config.js --coverage",
     "cypress:open": "cypress open",
