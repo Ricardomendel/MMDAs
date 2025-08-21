@@ -295,6 +295,7 @@ function App() {
     } finally {
       setLoadingUsers(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, loadingUsers]); // Only depend on user role, not the entire user object
 
   // Dashboard data functions
@@ -317,6 +318,7 @@ function App() {
         setLoadingDashboard(false);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, loadingDashboard, throttledApiCall]); // Only depend on user role, not the entire user object
 
   const fetchStaffDashboardStats = useCallback(async () => {
@@ -346,6 +348,7 @@ function App() {
     } finally {
       setLoadingDashboard(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, loadingDashboard]); // Only depend on user role, not the entire user object
 
   const fetchRevenueCategories = useCallback(async () => {
@@ -361,6 +364,7 @@ function App() {
         console.error('Error fetching revenue categories:', error);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, throttledApiCall]); // Only depend on user role, not the entire user object
 
   const fetchProperties = useCallback(async () => {
@@ -376,6 +380,7 @@ function App() {
         console.error('Error fetching properties:', error);
       }
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, throttledApiCall]); // Only depend on user role, not the entire user object
 
   const fetchRecentActivities = useCallback(async () => {
@@ -402,6 +407,7 @@ function App() {
     } catch (error) {
       console.error('Error fetching recent activities:', error);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]); // Only depend on user role, not the entire user object
 
   const handleCreateRevenueCategory = async () => {
@@ -479,6 +485,7 @@ function App() {
       fetchUsers();
       fetchRecentActivities();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, activeView]);
 
   const handleUpdateUser = async (userData: any, id?: string) => {
