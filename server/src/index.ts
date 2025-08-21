@@ -24,8 +24,7 @@ import adminRoutes from './routes/admin';
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 import { logger } from './utils/logger';
-import { connectDatabase, hasValidDatabaseConfig } from './config/database';
-import { connectMockDatabase } from './config/mockDatabase';
+import { connectPrisma } from './config/prisma';
 import { connectRedis } from './config/redis';
 
 // Load environment variables
@@ -167,32 +166,16 @@ if (process.env['NODE_ENV'] === 'production') {
 // Initialize database and start server
 async function startServer() {
   try {
-    // Connect to database (optional for development)
-    if (hasValidDatabaseConfig()) {
-      logger.info('Database configuration detected, attempting connection...');
-      try {
-        await connectDatabase();
-        logger.info('Database connected successfully');
-      } catch (dbError) {
-        const errorMessage = dbError instanceof Error ? dbError.message : 'Unknown database error';
-        logger.warn('Database connection failed, running without database:', errorMessage);
-        // Try to connect to mock database directly
-        try {
-          await connectMockDatabase();
-          logger.info('Successfully connected to mock database as fallback');
-        } catch (mockError) {
-          logger.error('Failed to connect to mock database:', mockError);
-        }
-      }
-    } else {
-      logger.info('No database configuration found, using mock database');
-      try {
-        await connectMockDatabase();
-        logger.info('Successfully connected to mock database');
-      } catch (dbError) {
-        logger.error('Failed to initialize mock database:', dbError);
-        // Continue anyway - the app should still work
-      }
+    // Connect to database using Prisma only
+    try {
+      logger.info('Attempting to connect to Prisma database...');
+      await connectPrisma();
+      logger.info('Prisma connected successfully');
+    } catch (dbError) {
+      const errorMessage = dbError instanceof Error ? dbError.message : 'Unknown database error';
+      logger.error('Prisma connection failed:', errorMessage);
+      logger.error('Please ensure your DATABASE_URL is correctly set in the .env file');
+      process.exit(1);
     }
 
     // Connect to Redis (optional for development)

@@ -1,15 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { db, mockDb } from '../config/database';
+import { prisma } from '../config/prisma';
 import { getSession } from '../config/redis';
 import { logger } from '../utils/logger';
 
 interface AuthRequest extends Request {
   user?: {
-    id: string;
+    id: number;
     email: string;
     role: string;
-    mmda_id?: string;
+    mmda_id?: number | undefined;
   };
 }
 
@@ -44,16 +44,10 @@ export const authMiddleware = async (
     }
 
     // Check if user exists and is active
-    let user;
-    try {
-      user = await db('users')
-        .select('id', 'email', 'role', 'status', 'mmda_id')
-        .where('id', decoded.id)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
-      user = mockDb.users.where('id', decoded.id).first();
-    }
+    const user = await prisma.user.findFirst({
+      where: { id: decoded.id },
+      select: { id: true, email: true, role: true, status: true, mmda_id: true }
+    });
 
     if (!user) {
       res.status(401).json({
@@ -94,7 +88,7 @@ export const authMiddleware = async (
       id: user.id,
       email: user.email,
       role: user.role,
-      mmda_id: user.mmda_id
+      ...(user.mmda_id && { mmda_id: user.mmda_id })
     };
 
     next();
@@ -172,18 +166,20 @@ export const optionalAuth = async (
       return;
     }
 
-    const user = await db('users')
-      .select('id', 'email', 'role', 'status', 'mmda_id')
-      .where('id', decoded.id)
-      .where('status', 'active')
-      .first();
+    const user = await prisma.user.findFirst({
+      where: { 
+        id: decoded.id,
+        status: 'active'
+      },
+      select: { id: true, email: true, role: true, status: true, mmda_id: true }
+    });
 
     if (user) {
       req.user = {
         id: user.id,
         email: user.email,
         role: user.role,
-        mmda_id: user.mmda_id
+        ...(user.mmda_id && { mmda_id: user.mmda_id })
       };
     }
 

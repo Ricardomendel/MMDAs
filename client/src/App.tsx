@@ -266,25 +266,36 @@ function App() {
 
   // User management functions
   const fetchUsers = useCallback(async () => {
-    if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
+    if (!user || (user.role !== 'admin' && user.role !== 'super_admin' && user.role !== 'staff')) return;
     
     // Prevent multiple simultaneous calls
     if (loadingUsers) return;
     
-    throttledApiCall('fetchUsers', async () => {
-      setLoadingUsers(true);
-      try {
-        const response = await adminAPI.getUsers();
-        if (response.data.success) {
-          setUsers(response.data.data);
-        }
-      } catch (error) {
-        console.error('Error fetching users:', error);
-      } finally {
-        setLoadingUsers(false);
+    setLoadingUsers(true);
+    try {
+      console.log('Fetching users for role:', user.role);
+      let response;
+      if (user.role === 'staff') {
+        // Staff users can only see taxpayers
+        console.log('Using staff-specific users endpoint');
+        response = await adminAPI.getUsersForStaff();
+      } else {
+        // Admin users can see all users
+        console.log('Using admin users endpoint');
+        response = await adminAPI.getUsers();
       }
-    });
-  }, [user, loadingUsers, throttledApiCall]);
+      
+      console.log('Users response:', response);
+      if (response.data.success) {
+        setUsers(response.data.data);
+        console.log('Users set:', response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching users:', error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [user?.role, loadingUsers]); // Only depend on user role, not the entire user object
 
   // Dashboard data functions
   const fetchDashboardStats = useCallback(async () => {
@@ -306,7 +317,36 @@ function App() {
         setLoadingDashboard(false);
       }
     });
-  }, [user, loadingDashboard, throttledApiCall]);
+  }, [user?.role, loadingDashboard, throttledApiCall]); // Only depend on user role, not the entire user object
+
+  const fetchStaffDashboardStats = useCallback(async () => {
+    if (!user || user.role !== 'staff') return;
+    
+    // Prevent multiple simultaneous calls
+    if (loadingDashboard) return;
+    
+    setLoadingDashboard(true);
+    try {
+      console.log('Fetching staff dashboard stats...');
+      const response = await adminAPI.getStaffDashboard();
+      console.log('Staff dashboard response:', response);
+      if (response.data.success) {
+        // Transform the data structure to match what the frontend expects
+        const transformedData = {
+          pendingReports: response.data.data.summary.pendingReports,
+          totalTaxpayers: response.data.data.summary.totalTaxpayers,
+          activeUsers: response.data.data.summary.activeUsers,
+          recentAssessments: response.data.data.summary.recentAssessments
+        };
+        console.log('Transformed dashboard data:', transformedData);
+        setDashboardStats(transformedData);
+      }
+    } catch (error) {
+      console.error('Error fetching staff dashboard stats:', error);
+    } finally {
+      setLoadingDashboard(false);
+    }
+  }, [user?.role, loadingDashboard]); // Only depend on user role, not the entire user object
 
   const fetchRevenueCategories = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
@@ -321,7 +361,7 @@ function App() {
         console.error('Error fetching revenue categories:', error);
       }
     });
-  }, [user, throttledApiCall]);
+  }, [user?.role, throttledApiCall]); // Only depend on user role, not the entire user object
 
   const fetchProperties = useCallback(async () => {
     if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
@@ -336,22 +376,33 @@ function App() {
         console.error('Error fetching properties:', error);
       }
     });
-  }, [user, throttledApiCall]);
+  }, [user?.role, throttledApiCall]); // Only depend on user role, not the entire user object
 
   const fetchRecentActivities = useCallback(async () => {
-    if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) return;
+    if (!user || (user.role !== 'admin' && user.role !== 'super_admin' && user.role !== 'staff')) return;
     
-    throttledApiCall('fetchRecentActivities', async () => {
-      try {
-        const response = await adminAPI.getRecentActivities();
-        if (response.data.success) {
-          setRecentActivities(response.data.data);
-        }
-      } catch (error) {
-        console.error('Error fetching recent activities:', error);
+    try {
+      console.log('Fetching recent activities for role:', user.role);
+      let response;
+      if (user.role === 'staff') {
+        // Staff users can only see taxpayer-related activities
+        console.log('Using staff-specific activities endpoint');
+        response = await adminAPI.getRecentActivitiesForStaff();
+      } else {
+        // Admin users can see all activities
+        console.log('Using admin activities endpoint');
+        response = await adminAPI.getRecentActivities();
       }
-    });
-  }, [user, throttledApiCall]);
+      
+      console.log('Activities response:', response);
+      if (response.data.success) {
+        setRecentActivities(response.data.data);
+        console.log('Activities set:', response.data.data);
+      }
+    } catch (error) {
+      console.error('Error fetching recent activities:', error);
+    }
+  }, [user?.role]); // Only depend on user role, not the entire user object
 
   const handleCreateRevenueCategory = async () => {
     try {
@@ -395,24 +446,37 @@ function App() {
   // Fetch users when user changes or when accessing user management
   useEffect(() => {
     if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'users') {
-      throttledApiCall('fetchUsers', () => { fetchUsers(); }, 2000);
+      fetchUsers();
     }
-  }, [user, activeView, throttledApiCall, fetchUsers]);
+  }, [user?.role, activeView]); // Only depend on user role and activeView, not the function
+
+  // Fetch users when staff accesses dashboard (for accurate counts)
+  useEffect(() => {
+    if (user && user.role === 'staff' && activeView === 'dashboard') {
+      // Only fetch once when dashboard is accessed
+      fetchUsers();
+    }
+  }, [user?.role, activeView]); // Only depend on user role and activeView
 
   // Fetch dashboard data when admin dashboard is accessed
   useEffect(() => {
     if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'dashboard') {
-      const timer = setTimeout(() => {
-        throttledApiCall('dashboardData', () => {
-          fetchDashboardStats();
-          fetchRevenueCategories();
-          fetchProperties();
-          fetchRecentActivities();
-        }, 3000);
-      }, 500);
-      return () => clearTimeout(timer);
+      fetchDashboardStats();
+      fetchRevenueCategories();
+      fetchProperties();
+      fetchRecentActivities();
     }
-  }, [user, activeView, throttledApiCall, fetchDashboardStats, fetchRevenueCategories, fetchProperties, fetchRecentActivities]);
+  }, [user?.role, activeView]); // Only depend on user role and activeView, not the functions
+
+  // Fetch dashboard data when staff dashboard is accessed
+  useEffect(() => {
+    if (user && user.role === 'staff' && activeView === 'dashboard') {
+      // Only fetch once when dashboard is accessed
+      fetchStaffDashboardStats();
+      fetchUsers();
+      fetchRecentActivities();
+    }
+  }, [user?.role, activeView]); // Only depend on user role and activeView, not the functions
 
   const handleUpdateUser = async (userData: any, id?: string) => {
     if (!id) {
@@ -454,6 +518,95 @@ function App() {
   };
 
   // Role-based dashboard rendering
+  const renderStaffDashboard = () => (
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" gutterBottom>
+          Staff Dashboard
+        </Typography>
+        <Button variant="outlined" onClick={() => {
+          fetchStaffDashboardStats();
+          fetchUsers();
+          fetchRecentActivities();
+        }}>
+          Refresh Data
+        </Button>
+      </Box>
+      
+      {loadingDashboard ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Pending Reports
+                  </Typography>
+                  <Typography variant="h4">
+                    {dashboardStats?.pendingReports?.toLocaleString() || '0'}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Total Taxpayers
+                  </Typography>
+                  <Typography variant="h4">
+                    {loadingUsers ? '...' : users.filter(u => u.role === 'taxpayer').length.toLocaleString()}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Recent Assessments
+                  </Typography>
+                  <Typography variant="h4">
+                    {loadingDashboard ? '...' : recentActivities.length.toLocaleString()}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={6} lg={3}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    Total Users
+                  </Typography>
+                  <Typography variant="h4">
+                    {loadingUsers ? '...' : users.length.toLocaleString()}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          <Box sx={{ mt: 4 }}>
+            <Typography variant="h5" gutterBottom>
+              System Overview
+            </Typography>
+            <Card>
+              <CardContent>
+                <Typography variant="body2" color="textSecondary" align="center">
+                  Staff dashboard shows key metrics for monitoring taxpayer registrations and system activity.
+                </Typography>
+              </CardContent>
+            </Card>
+          </Box>
+        </>
+      )}
+    </Box>
+  );
+
   const renderAdminDashboard = () => (
     <Box>
       <Typography variant="h4" gutterBottom>
@@ -831,13 +984,15 @@ function App() {
         <Typography variant="h4">
           User Management
         </Typography>
-        <Button 
-          variant="contained" 
-          startIcon={<AddIcon />}
-          onClick={() => openUserDialog()}
-        >
-          Add User
-        </Button>
+        {user?.role === 'admin' || user?.role === 'super_admin' ? (
+          <Button 
+            variant="contained" 
+            startIcon={<AddIcon />}
+            onClick={() => openUserDialog()}
+          >
+            Add User
+          </Button>
+        ) : null}
       </Box>
       
       <Card>
@@ -846,29 +1001,34 @@ function App() {
             User Statistics
           </Typography>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={3}>
-              <Typography variant="h4">{users.length}</Typography>
-              <Typography variant="body2" color="textSecondary">Total Users</Typography>
-            </Grid>
-            <Grid item xs={12} md={3}>
+            <Grid item xs={12} md={4}>
               <Typography variant="h4">{users.filter(u => u.role === 'taxpayer').length}</Typography>
-              <Typography variant="body2" color="textSecondary">Taxpayers</Typography>
+              <Typography variant="body2" color="textSecondary">Total Taxpayers</Typography>
             </Grid>
-            <Grid item xs={12} md={3}>
-              <Typography variant="h4">{users.filter(u => u.role === 'staff').length}</Typography>
-              <Typography variant="body2" color="textSecondary">MMDA Staff</Typography>
-            </Grid>
-            <Grid item xs={12} md={3}>
-              <Typography variant="h4">{users.filter(u => u.role === 'admin' || u.role === 'super_admin').length}</Typography>
-              <Typography variant="body2" color="textSecondary">Administrators</Typography>
-            </Grid>
+            {user?.role === 'admin' || user?.role === 'super_admin' ? (
+              <>
+                <Grid item xs={12} md={4}>
+                  <Typography variant="h4">{users.filter(u => u.role === 'staff').length}</Typography>
+                  <Typography variant="body2" color="textSecondary">MMDA Staff</Typography>
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Typography variant="h4">{users.filter(u => u.role === 'admin' || u.role === 'super_admin').length}</Typography>
+                  <Typography variant="body2" color="textSecondary">Administrators</Typography>
+                </Grid>
+              </>
+            ) : (
+              <Grid item xs={12} md={4}>
+                <Typography variant="h4">{users.filter(u => u.role === 'taxpayer' && u.status === 'active').length}</Typography>
+                <Typography variant="body2" color="textSecondary">Active Taxpayers</Typography>
+              </Grid>
+            )}
           </Grid>
         </CardContent>
       </Card>
 
       <Box sx={{ mt: 3 }}>
         <Typography variant="h6" gutterBottom>
-          All Users
+          {user?.role === 'admin' || user?.role === 'super_admin' ? 'All Users' : 'Taxpayer Users'}
         </Typography>
         {loadingUsers ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
@@ -877,13 +1037,13 @@ function App() {
         ) : (
           <Card>
             <CardContent>
-              {users.length === 0 ? (
+              {users.filter(u => user?.role === 'admin' || user?.role === 'super_admin' ? true : u.role === 'taxpayer').length === 0 ? (
                 <Typography variant="body2" color="textSecondary" align="center">
                   No users found
                 </Typography>
               ) : (
                 <List>
-                  {users.map((userItem, index) => (
+                  {users.filter(u => user?.role === 'admin' || user?.role === 'super_admin' ? true : u.role === 'taxpayer').map((userItem, index) => (
                     <React.Fragment key={userItem.id}>
                       <ListItem>
                         <ListItemText
@@ -911,90 +1071,104 @@ function App() {
                         />
                         <ListItemSecondaryAction>
                           <Box sx={{ display: 'flex', gap: 1 }}>
-                            <IconButton
-                              size="small"
-                              onClick={() => sendAuthorizationEmail(userItem.id, 'welcome')}
-                              title="Send Welcome Email"
-                            >
-                              <EmailIcon />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setEditingUser(userItem);
-                                setUserDialogOpen(true);
-                              }}
-                              title="Edit User"
-                            >
-                              <EditIcon />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setUserMenuAnchor(document.getElementById(`user-menu-${userItem.id}`));
-                                setSelectedUserForMenu(userItem);
-                              }}
-                              title="More Actions"
-                            >
-                              <MoreVertIcon />
-                            </IconButton>
+                            {user?.role === 'admin' || user?.role === 'super_admin' ? (
+                              <>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => sendAuthorizationEmail(userItem.id, 'welcome')}
+                                  title="Send Welcome Email"
+                                >
+                                  <EmailIcon />
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => {
+                                    setEditingUser(userItem);
+                                    setUserDialogOpen(true);
+                                  }}
+                                  title="Edit User"
+                                >
+                                  <EditIcon />
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => {
+                                    setUserMenuAnchor(document.getElementById(`user-menu-${userItem.id}`));
+                                    setSelectedUserForMenu(userItem);
+                                  }}
+                                  title="More Actions"
+                                >
+                                  <MoreVertIcon />
+                                </IconButton>
+                              </>
+                            ) : (
+                              <IconButton
+                                size="small"
+                                onClick={() => sendAuthorizationEmail(userItem.id, 'welcome')}
+                                title="Send Welcome Email"
+                              >
+                                <EmailIcon />
+                              </IconButton>
+                            )}
                           </Box>
                           
-                          {/* User Action Menu */}
-                          <Menu
-                            id={`user-menu-${userItem.id}`}
-                            anchorEl={userMenuAnchor}
-                            open={Boolean(userMenuAnchor) && selectedUserForMenu?.id === userItem.id}
-                            onClose={() => {
-                              setUserMenuAnchor(null);
-                              setSelectedUserForMenu(null);
-                            }}
-                          >
-                            <MenuItem onClick={() => {
-                              sendAuthorizationEmail(userItem.id, 'account_activation');
-                              setUserMenuAnchor(null);
-                              setSelectedUserForMenu(null);
-                            }}>
-                              <EmailIcon sx={{ mr: 1 }} />
-                              Send Activation Email
-                            </MenuItem>
-                            <MenuItem onClick={() => {
-                              sendAuthorizationEmail(userItem.id, 'password_reset');
-                              setUserMenuAnchor(null);
-                              setSelectedUserForMenu(null);
-                            }}>
-                              <EmailIcon sx={{ mr: 1 }} />
-                              Send Password Reset
-                            </MenuItem>
-                            <Divider />
-                            <MenuItem onClick={() => {
-                              // Toggle user status
-                              const newStatus = userItem.status === 'active' ? 'inactive' : 'active';
-                              handleUpdateUser({ ...userItem, status: newStatus }, userItem.id.toString());
-                              setUserMenuAnchor(null);
-                              setSelectedUserForMenu(null);
-                            }}>
-                              <Switch 
-                                checked={userItem.status === 'active'} 
-                                size="small"
-                                sx={{ mr: 1 }}
-                              />
-                              {userItem.status === 'active' ? 'Deactivate' : 'Activate'}
-                            </MenuItem>
-                            <MenuItem 
-                              onClick={() => {
-                                if (window.confirm(`Are you sure you want to delete ${userItem.first_name} ${userItem.last_name}?`)) {
-                                  handleDeleteUser(userItem.id.toString());
-                                }
+                          {/* User Action Menu - Only for admin users */}
+                          {(user?.role === 'admin' || user?.role === 'super_admin') && (
+                            <Menu
+                              id={`user-menu-${userItem.id}`}
+                              anchorEl={userMenuAnchor}
+                              open={Boolean(userMenuAnchor) && selectedUserForMenu?.id === userItem.id}
+                              onClose={() => {
                                 setUserMenuAnchor(null);
                                 setSelectedUserForMenu(null);
                               }}
-                              sx={{ color: 'error.main' }}
                             >
-                              <DeleteIcon sx={{ mr: 1 }} />
-                              Delete User
-                            </MenuItem>
-                          </Menu>
+                              <MenuItem onClick={() => {
+                                sendAuthorizationEmail(userItem.id, 'account_activation');
+                                setUserMenuAnchor(null);
+                                setSelectedUserForMenu(null);
+                              }}>
+                                <EmailIcon sx={{ mr: 1 }} />
+                                Send Activation Email
+                              </MenuItem>
+                              <MenuItem onClick={() => {
+                                sendAuthorizationEmail(userItem.id, 'password_reset');
+                                setUserMenuAnchor(null);
+                                setSelectedUserForMenu(null);
+                              }}>
+                                <EmailIcon sx={{ mr: 1 }} />
+                                Send Password Reset
+                              </MenuItem>
+                              <Divider />
+                              <MenuItem onClick={() => {
+                                // Toggle user status
+                                const newStatus = userItem.status === 'active' ? 'inactive' : 'active';
+                                handleUpdateUser({ ...userItem, status: newStatus }, userItem.id.toString());
+                                setUserMenuAnchor(null);
+                                setSelectedUserForMenu(null);
+                              }}>
+                                <Switch 
+                                  checked={userItem.status === 'active'} 
+                                  size="small"
+                                  sx={{ mr: 1 }}
+                                />
+                                {userItem.status === 'active' ? 'Deactivate' : 'Activate'}
+                              </MenuItem>
+                              <MenuItem 
+                                onClick={() => {
+                                  if (window.confirm(`Are you sure you want to delete ${userItem.first_name} ${userItem.last_name}?`)) {
+                                    handleDeleteUser(userItem.id.toString());
+                                  }
+                                  setUserMenuAnchor(null);
+                                  setSelectedUserForMenu(null);
+                                }}
+                                sx={{ color: 'error.main' }}
+                              >
+                                <DeleteIcon sx={{ mr: 1 }} />
+                                Delete User
+                              </MenuItem>
+                            </Menu>
+                          )}
                         </ListItemSecondaryAction>
                       </ListItem>
                       {index < users.length - 1 && <Divider />}
@@ -1308,8 +1482,10 @@ function App() {
     if (!user) return null;
     
     // Show different dashboard based on user role
-    if (user.role === 'admin' || user.role === 'staff' || user.role === 'super_admin') {
+    if (user.role === 'admin' || user.role === 'super_admin') {
       return renderAdminDashboard();
+    } else if (user.role === 'staff') {
+      return renderStaffDashboard();
     } else {
       return renderTaxpayerDashboard();
     }
@@ -1322,10 +1498,16 @@ function App() {
       case 'revenue':
         return renderRevenueManagement();
       case 'payments':
+        // Only allow admin, super_admin, and taxpayer roles to access payments
         if (user?.role === 'taxpayer') {
           return renderTaxpayerPayments();
+        } else if (user?.role === 'admin' || user?.role === 'super_admin') {
+          return renderPayments();
+        } else {
+          // Staff users - redirect to dashboard
+          setActiveView('dashboard');
+          return renderDashboard();
         }
-        return renderPayments();
       case 'users':
         return renderUsers();
       case 'reports':
@@ -1334,7 +1516,14 @@ function App() {
         }
         return renderReports();
       case 'properties':
-        return renderProperties();
+        // Only allow admin and super_admin roles to access properties
+        if (user?.role === 'admin' || user?.role === 'super_admin') {
+          return renderProperties();
+        } else {
+          // Staff and taxpayer users - redirect to dashboard
+          setActiveView('dashboard');
+          return renderDashboard();
+        }
       case 'settings':
         return renderSettings();
       case 'profile':
@@ -1415,18 +1604,23 @@ function App() {
                 </ListItemIcon>
                 <ListItemText primary="Revenue Management" />
               </ListItem>
-              <ListItem button onClick={() => setActiveView('payments')}>
-                <ListItemIcon>
-                  <PaymentIcon />
-                </ListItemIcon>
-                <ListItemText primary="Payments" />
-              </ListItem>
-              <ListItem button onClick={() => setActiveView('properties')}>
-                <ListItemIcon>
-                  <BusinessIcon />
-                </ListItemIcon>
-                <ListItemText primary="Properties" />
-              </ListItem>
+              {/* Only show Payments and Properties for admin and super_admin users */}
+              {(user.role === 'admin' || user.role === 'super_admin') && (
+                <>
+                  <ListItem button onClick={() => setActiveView('payments')}>
+                    <ListItemIcon>
+                      <PaymentIcon />
+                    </ListItemIcon>
+                    <ListItemText primary="Payments" />
+                  </ListItem>
+                  <ListItem button onClick={() => setActiveView('properties')}>
+                    <ListItemIcon>
+                      <BusinessIcon />
+                    </ListItemIcon>
+                    <ListItemText primary="Properties" />
+                  </ListItem>
+                </>
+              )}
               <ListItem button onClick={() => setActiveView('reports')}>
                 <ListItemIcon>
                   <AssessmentIcon />

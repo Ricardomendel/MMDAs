@@ -2,16 +2,17 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { body, validationResult } from 'express-validator';
-import { db, mockDb, hasValidDatabaseConfig } from '../config/database';
+import { prisma } from '../config/prisma';
 import { setSession, deleteSession } from '../config/redis';
 import { logger, logUserAction, logSecurity } from '../utils/logger';
 import { sendEmail } from '../utils/email';
 import { sendSMS } from '../utils/sms';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
 // Determine once per process whether a real DB is configured
-const useRealDatabase = hasValidDatabaseConfig();
+const useRealDatabase = true; // Prisma is always used for now
 
 // Validation middleware (kept for reference, not used)
 // const validateRegistration = [
@@ -137,16 +138,20 @@ router.post('/register', customValidateRegistration, async (req: Request, res: R
     let existingUser;
     if (useRealDatabase) {
       try {
-        existingUser = await db('users')
-          .where('email', email)
-          .orWhere('phone', phone)
-          .first();
+        existingUser = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { email: email },
+              { phone: phone }
+            ]
+          }
+        });
       } catch (dbError) {
         logger.warn('Database query failed, using mock database:', dbError);
-        existingUser = mockDb.users.where('email', email).first() || mockDb.users.where('phone', phone).first();
+        // Mock database logic would go here if needed
       }
     } else {
-      existingUser = mockDb.users.where('email', email).first() || mockDb.users.where('phone', phone).first();
+      // Mock database logic would go here if needed
     }
 
     if (existingUser) {
@@ -160,12 +165,21 @@ router.post('/register', customValidateRegistration, async (req: Request, res: R
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user
+    // Create user with role based on email domain
     let user;
     if (useRealDatabase) {
       try {
-        const [newUser] = await db('users')
-          .insert({
+        // Determine role based on email domain
+        let userRole = 'taxpayer'; // default role
+        if (email.endsWith('@admin.com')) {
+          userRole = 'admin';
+        } else if (email.endsWith('@staff.com')) {
+          userRole = 'staff';
+        }
+        // All other domains (including @gmail.com) get 'taxpayer' role
+
+        user = await prisma.user.create({
+          data: {
             email,
             phone,
             password_hash: passwordHash,
@@ -179,57 +193,39 @@ router.post('/register', customValidateRegistration, async (req: Request, res: R
             city,
             region,
             postal_code,
-            role: 'taxpayer',
+            role: userRole,
             status: 'pending'
-          })
-          .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status']);
-        user = newUser;
+          },
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+            role: true,
+            status: true
+          }
+        });
       } catch (dbError) {
         logger.warn('Database insert failed, using mock database:', dbError);
-        const [createdUser] = mockDb.users
-          .insert({
-            email,
-            phone,
-            password_hash: passwordHash,
-            first_name,
-            last_name,
-            middle_name,
-            ghana_card_number,
-            date_of_birth,
-            gender,
-            address,
-            city,
-            region,
-            postal_code,
-            role: 'taxpayer',
-            status: 'active',
-            email_verified: true
-          })
-          .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status']);
-        user = createdUser;
+        // Mock database logic would go here if needed
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create user in database'
+        });
       }
     } else {
-      const [createdUser] = mockDb.users
-        .insert({
-          email,
-          phone,
-          password_hash: passwordHash,
-          first_name,
-          last_name,
-          middle_name,
-          ghana_card_number,
-          date_of_birth,
-          gender,
-          address,
-          city,
-          region,
-          postal_code,
-          role: 'taxpayer',
-          status: 'active',
-          email_verified: true
-        })
-        .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status']);
-      user = createdUser;
+      // Mock database logic would go here if needed
+      return res.status(500).json({
+        success: false,
+        message: 'Mock database not implemented'
+      });
+    }
+
+    if (!user) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create user'
+      });
     }
 
     // Best-effort notifications: do not fail registration if email/SMS fails
@@ -249,7 +245,7 @@ router.post('/register', customValidateRegistration, async (req: Request, res: R
       })
     ]);
 
-    logUserAction(user.id, 'user_registered', { email, phone });
+    logUserAction(String(user.id), 'user_registered', { email, phone });
 
     return res.status(201).json({
       success: true,
@@ -308,15 +304,17 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
     let user;
     if (useRealDatabase) {
       try {
-        user = await db('users')
-          .where('email', email)
-          .first();
+        user = await prisma.user.findFirst({
+          where: {
+            email: email
+          }
+        });
       } catch (dbError) {
         logger.warn('Database query failed, using mock database:', dbError);
-        user = mockDb.users.where('email', email).first();
+        // Mock database logic would go here if needed
       }
     } else {
-      user = mockDb.users.where('email', email).first();
+      // Mock database logic would go here if needed
     }
 
     if (!user) {
@@ -344,53 +342,73 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
       
       if (loginAttempts >= maxAttempts) {
         const lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+        // Update login attempts and lock if necessary
         if (useRealDatabase) {
           try {
-            await db('users')
-              .where('id', user.id)
-              .update({
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
                 login_attempts: loginAttempts,
                 locked_until: lockUntil
-              });
+              }
+            });
           } catch (dbError) {
             logger.warn('Database update failed, using mock database:', dbError);
-            mockDb.users.where('id', user.id).update({
-              login_attempts: loginAttempts,
-              locked_until: lockUntil
-            });
+            // Mock database logic would go here if needed
           }
         } else {
-          mockDb.users.where('id', user.id).update({
-            login_attempts: loginAttempts,
-            locked_until: lockUntil
-          });
+          // Mock database logic would go here if needed
         }
         
-        logSecurity('account_locked', user.id, { email, loginAttempts });
-        return res.status(423).json({
+        logSecurity('failed_login_attempt', String(user.id), { email, reason: 'account_locked', attempts: loginAttempts });
+        
+        return res.status(403).json({
           success: false,
-          message: 'Account locked due to multiple failed login attempts. Please try again in 30 minutes.'
+          message: 'Account locked due to too many failed attempts. Please try again later or reset your password.'
         });
-      } else {
-        if (useRealDatabase) {
-          try {
-            await db('users')
-              .where('id', user.id)
-              .update({ login_attempts: loginAttempts });
-          } catch (dbError) {
-            logger.warn('Database update failed, using mock database:', dbError);
-            mockDb.users.where('id', user.id).update({ login_attempts: loginAttempts });
-          }
-        } else {
-          mockDb.users.where('id', user.id).update({ login_attempts: loginAttempts });
-        }
       }
 
-      logSecurity('failed_login_attempt', user.id, { email, loginAttempts });
+      // Update login attempts
+      if (useRealDatabase) {
+        try {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { login_attempts: loginAttempts }
+          });
+        } catch (dbError) {
+          logger.warn('Database update failed, using mock database:', dbError);
+          // Mock database logic would go here if needed
+        }
+      } else {
+        // Mock database logic would go here if needed
+      }
+      
+      logSecurity('failed_login_attempt', String(user.id), { email, reason: 'invalid_password', attempts: loginAttempts });
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
       });
+    }
+
+    // Reset login attempts and update last login
+    if (useRealDatabase) {
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            login_attempts: 0,
+            locked_until: null,
+            last_login_at: new Date(),
+            last_login_ip: req.ip || null
+          }
+        });
+      } catch (dbError) {
+        logger.warn('Database update failed, using mock database:', dbError);
+        // Mock database logic would go here if needed
+      }
+    } else {
+      // Mock database logic would go here if needed
     }
 
     // Check if account is active
@@ -398,35 +416,6 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
       return res.status(403).json({
         success: false,
         message: 'Account is not active. Please verify your email or contact support.'
-      });
-    }
-
-    // Reset login attempts
-    if (useRealDatabase) {
-      try {
-        await db('users')
-          .where('id', user.id)
-          .update({
-            login_attempts: 0,
-            locked_until: null,
-            last_login_at: new Date(),
-            last_login_ip: req.ip
-          });
-      } catch (dbError) {
-        logger.warn('Database update failed, using mock database:', dbError);
-        mockDb.users.where('id', user.id).update({
-          login_attempts: 0,
-          locked_until: null,
-          last_login_at: new Date(),
-          last_login_ip: req.ip
-        });
-      }
-    } else {
-      mockDb.users.where('id', user.id).update({
-        login_attempts: 0,
-        locked_until: null,
-        last_login_at: new Date(),
-        last_login_ip: req.ip
       });
     }
 
@@ -443,7 +432,7 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
     );
 
     // Store session in Redis
-    await setSession(user.id, {
+    await setSession(String(user.id), {
       id: user.id,
       email: user.email,
       role: user.role,
@@ -451,7 +440,7 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
       lastActivity: new Date().toISOString()
     });
 
-    logUserAction(user.id, 'user_login', { email, ip: req.ip });
+    logUserAction(String(user.id), 'user_login', { email, ip: req.ip });
 
     return res.json({
       success: true,
@@ -489,8 +478,8 @@ router.post('/logout', async (req: Request, res: Response) => {
       try {
         const decoded = jwt.verify(token, secret) as any;
         if (decoded && decoded.id) {
-          await deleteSession(decoded.id);
-          logUserAction(decoded.id, 'user_logout');
+          await deleteSession(String(decoded.id));
+          logUserAction(String(decoded.id), 'user_logout');
         }
       } catch (error) {
         // Token is invalid, but we still return success
@@ -527,12 +516,14 @@ router.post('/forgot-password', validatePasswordReset, async (req: Request, res:
     // Try real database first, fall back to mock
     let user;
     try {
-      user = await db('users')
-        .where('email', email)
-        .first();
+      user = await prisma.user.findFirst({
+        where: {
+          email: email
+        }
+      });
     } catch (dbError) {
       logger.warn('Database query failed, using mock database:', dbError);
-      user = mockDb.users.where('email', email).first();
+      // Mock database logic would go here if needed
     }
 
     if (!user) {
@@ -563,7 +554,7 @@ router.post('/forgot-password', validatePasswordReset, async (req: Request, res:
       }
     });
 
-    logUserAction(user.id, 'password_reset_requested', { email });
+    logUserAction(String(user.id), 'password_reset_requested', { email });
 
     return res.json({
       success: true,
@@ -605,12 +596,14 @@ router.post('/reset-password', async (req: Request, res: Response) => {
       // Try real database first, fall back to mock
       let user;
       try {
-        user = await db('users')
-          .where('id', decoded.id)
-          .first();
+        user = await prisma.user.findFirst({
+          where: {
+            id: decoded.id
+          }
+        });
       } catch (dbError) {
         logger.warn('Database query failed, using mock database:', dbError);
-        user = mockDb.users.where('id', decoded.id).first();
+        // Mock database logic would go here if needed
       }
 
       if (!user) {
@@ -626,26 +619,23 @@ router.post('/reset-password', async (req: Request, res: Response) => {
 
       // Update password
       try {
-        await db('users')
-          .where('id', user.id)
-          .update({
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
             password_hash: passwordHash,
             login_attempts: 0,
             locked_until: null
-          });
+          }
+        });
       } catch (dbError) {
         logger.warn('Database update failed, using mock database:', dbError);
-        mockDb.users.where('id', user.id).update({
-          password_hash: passwordHash,
-          login_attempts: 0,
-          locked_until: null
-        });
+        // Mock database logic would go here if needed
       }
 
       // Delete reset token
       await deleteSession(`reset_${user.id}`);
 
-      logUserAction(user.id, 'password_reset_completed', { email: user.email });
+      logUserAction(String(user.id), 'password_reset_completed', { email: user.email });
 
       return res.json({
         success: true,
@@ -681,12 +671,14 @@ router.post('/verify-email', async (req: Request, res: Response) => {
     // Try real database first, fall back to mock
     let user;
     try {
-      user = await db('users')
-        .where('id', token)
-        .first();
+      user = await prisma.user.findFirst({
+        where: {
+          id: token
+        }
+      });
     } catch (dbError) {
       logger.warn('Database query failed, using mock database:', dbError);
-      user = mockDb.users.where('id', token).first();
+      // Mock database logic would go here if needed
     }
 
     if (!user) {
@@ -705,23 +697,20 @@ router.post('/verify-email', async (req: Request, res: Response) => {
 
     // Update user status
     try {
-      await db('users')
-        .where('id', user.id)
-        .update({
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
           email_verified: true,
           email_verified_at: new Date(),
           status: 'active'
-        });
+        }
+      });
     } catch (dbError) {
       logger.warn('Database update failed, using mock database:', dbError);
-      mockDb.users.where('id', user.id).update({
-        email_verified: true,
-        email_verified_at: new Date(),
-        status: 'active'
-      });
+      // Mock database logic would go here if needed
     }
 
-    logUserAction(user.id, 'email_verified', { email: user.email });
+    logUserAction(String(user.id), 'email_verified', { email: user.email });
 
     return res.json({
       success: true,
@@ -755,15 +744,29 @@ router.get('/profile', async (req: Request, res: Response) => {
     // Try real database first, fall back to mock
     let user;
     try {
-      user = await db('users')
-        .select('id', 'email', 'phone', 'first_name', 'last_name', 'middle_name', 'role', 'status', 'mmda_id', 'profile_image_url', 'email_verified', 'phone_verified', 'created_at')
-        .where('id', decoded.id)
-        .first();
+      user = await prisma.user.findFirst({
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          first_name: true,
+          last_name: true,
+          middle_name: true,
+          role: true,
+          status: true,
+          mmda_id: true,
+          profile_image_url: true,
+          email_verified: true,
+          phone_verified: true,
+          created_at: true
+        },
+        where: {
+          id: decoded.id
+        }
+      });
     } catch (dbError) {
       logger.warn('Database query failed, using mock database:', dbError);
-      user = mockDb.users.select('id', 'email', 'phone', 'first_name', 'last_name', 'role', 'status', 'mmda_id', 'email_verified', 'phone_verified', 'created_at')
-        .where('id', decoded.id)
-        .first();
+      // Mock database logic would go here if needed
     }
 
     if (!user) {
@@ -782,6 +785,504 @@ router.get('/profile', async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to get profile'
+    });
+  }
+});
+
+// Taxpayer-specific routes
+// Get taxpayer dashboard data
+router.get('/taxpayer/dashboard', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Verify user is a taxpayer
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'taxpayer') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Taxpayer role required.'
+      });
+    }
+
+    if (user.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        message: 'Account not active. Please verify your email.'
+      });
+    }
+
+    // Get taxpayer's assessments and payments
+    const assessments = await prisma.assessment.findMany({
+      where: { user_id: userId },
+      include: {
+        property: true,
+        revenue_category: true,
+        payments: true
+      },
+      orderBy: { created_at: 'desc' },
+      take: 10
+    });
+
+    // Calculate summary
+    const totalAssessments = assessments.length;
+    const totalAmount = assessments.reduce((sum, assessment) => sum + assessment.amount, 0);
+    const paidAmount = assessments.reduce((sum, assessment) => {
+      const paidPayments = assessment.payments.filter(payment => payment.status === 'completed');
+      return sum + paidPayments.reduce((pSum, payment) => pSum + payment.amount, 0);
+    }, 0);
+    const pendingAmount = totalAmount - paidAmount;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          totalAssessments,
+          totalAmount,
+          paidAmount,
+          pendingAmount
+        },
+        recentAssessments: assessments
+      }
+    });
+  } catch (error) {
+    logger.error('Taxpayer dashboard error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load dashboard data'
+    });
+  }
+});
+
+// Get taxpayer's payment history
+router.get('/taxpayer/history', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Verify user is a taxpayer
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'taxpayer') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Taxpayer role required.'
+      });
+    }
+
+    // Get all assessments and payments
+    const assessments = await prisma.assessment.findMany({
+      where: { user_id: userId },
+      include: {
+        property: true,
+        revenue_category: true,
+        payments: {
+          orderBy: { created_at: 'desc' }
+        }
+      },
+      orderBy: { created_at: 'desc' }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: assessments
+    });
+  } catch (error) {
+    logger.error('Taxpayer history error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load payment history'
+    });
+  }
+});
+
+// Submit a report
+router.post('/taxpayer/report', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const { title, content, type } = req.body;
+
+    if (!title || !content || !type) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title, content, and type are required'
+      });
+    }
+
+    // Verify user is a taxpayer
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'taxpayer') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Taxpayer role required.'
+      });
+    }
+
+    // Create report
+    const report = await prisma.report.create({
+      data: {
+        user_id: userId,
+        title,
+        content,
+        type,
+        status: 'pending'
+      }
+    });
+
+    logUserAction(String(userId), 'report_submitted', { title, type });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Report submitted successfully',
+      data: report
+    });
+  } catch (error) {
+    logger.error('Report submission error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to submit report'
+    });
+  }
+});
+
+// Get taxpayer's reports
+router.get('/taxpayer/reports', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Verify user is a taxpayer
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'taxpayer') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Taxpayer role required.'
+      });
+    }
+
+    // Get user's reports
+    const reports = await prisma.report.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' }
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: reports
+    });
+  } catch (error) {
+    logger.error('Get reports error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load reports'
+    });
+  }
+});
+
+// Revenue management - view revenue categories and rates
+router.get('/taxpayer/revenue-categories', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Verify user is a taxpayer
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true, mmda_id: true }
+    });
+
+    if (!user || user.role !== 'taxpayer') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Taxpayer role required.'
+      });
+    }
+
+    // Get revenue categories for user's MMDA
+    let revenueCategories: Array<{
+      id: number;
+      name: string;
+      description: string | null;
+      rate: number;
+      mmda_id: number;
+      created_at: Date;
+      updated_at: Date;
+    }> = [];
+    if (user.mmda_id) {
+      revenueCategories = await prisma.revenueCategory.findMany({
+        where: { mmda_id: user.mmda_id },
+        orderBy: { name: 'asc' }
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: revenueCategories
+    });
+  } catch (error) {
+    logger.error('Revenue categories error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load revenue categories'
+    });
+  }
+});
+
+// Tax payment route for taxpayers
+router.post('/taxpayer/pay-tax', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    const { assessment_id, amount, payment_method } = req.body;
+
+    if (!assessment_id || !amount || !payment_method) {
+      return res.status(400).json({
+        success: false,
+        message: 'Assessment ID, amount, and payment method are required'
+      });
+    }
+
+    // Verify user is a taxpayer
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'taxpayer') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Taxpayer role required.'
+      });
+    }
+
+    // Verify the assessment belongs to this user
+    const assessment = await prisma.assessment.findFirst({
+      where: { 
+        id: parseInt(assessment_id),
+        user_id: userId 
+      }
+    });
+
+    if (!assessment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Assessment not found'
+      });
+    }
+
+    // Create payment record
+    const payment = await prisma.payment.create({
+      data: {
+        assessment_id: parseInt(assessment_id),
+        amount: parseFloat(amount),
+        payment_method,
+        status: 'pending',
+        user_id: userId,
+        payment_reference: `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      }
+    });
+
+    logUserAction(String(userId), 'tax_payment_made', { 
+      assessment_id, 
+      amount, 
+      payment_method,
+      payment_id: payment.id 
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Tax payment recorded successfully',
+      data: payment
+    });
+  } catch (error) {
+    logger.error('Tax payment error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to process tax payment'
+    });
+  }
+});
+
+// Admin stats endpoint (what frontend expects)
+router.get('/admin/stats', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Verify user is an admin
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin role required.'
+      });
+    }
+
+    // Calculate total revenue from completed payments
+    const totalRevenue = await prisma.payment.aggregate({
+      where: { status: 'completed' },
+      _sum: { amount: true }
+    });
+
+    // Calculate pending payments
+    const pendingPayments = await prisma.payment.aggregate({
+      where: { status: 'pending' },
+      _sum: { amount: true }
+    });
+
+    // Get system statistics
+    const totalUsers = await prisma.user.count();
+    const totalTaxpayers = await prisma.user.count({ where: { role: 'taxpayer' } });
+    const totalStaff = await prisma.user.count({ where: { role: 'staff' } });
+    const activeUsers = await prisma.user.count({ where: { status: 'active' } });
+    const totalAssessments = await prisma.assessment.count();
+    const totalPayments = await prisma.payment.count();
+    const totalProperties = await prisma.property.count();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        totalRevenue: totalRevenue._sum.amount || 0,
+        pendingPayments: pendingPayments._sum.amount || 0,
+        activeUsers,
+        totalProperties,
+        totalUsers,
+        totalTaxpayers,
+        totalStaff,
+        totalAssessments,
+        totalPayments
+      }
+    });
+  } catch (error) {
+    logger.error('Admin stats error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load admin statistics'
+    });
+  }
+});
+
+// Admin dashboard route
+router.get('/admin/dashboard', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Verify user is an admin
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin role required.'
+      });
+    }
+
+    // Get system statistics
+    const totalUsers = await prisma.user.count();
+    const totalTaxpayers = await prisma.user.count({ where: { role: 'taxpayer' } });
+    const totalStaff = await prisma.user.count({ where: { role: 'staff' } });
+    const totalAssessments = await prisma.assessment.count();
+    const totalPayments = await prisma.payment.count();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Admin Dashboard',
+      data: {
+        dashboard: 'Admin Dashboard',
+        summary: {
+          totalUsers,
+          totalTaxpayers,
+          totalStaff,
+          totalAssessments,
+          totalPayments
+        },
+        user: {
+          id: userId,
+          role: user.role,
+          status: user.status
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Admin dashboard error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load admin dashboard'
+    });
+  }
+});
+
+// Staff dashboard route
+router.get('/staff/dashboard', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.id;
+    
+    // Verify user is staff
+    const user = await prisma.user.findFirst({
+      where: { id: userId },
+      select: { role: true, status: true }
+    });
+
+    if (!user || user.role !== 'staff') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Staff role required.'
+      });
+    }
+
+    // Get staff-specific data
+    const pendingReports = await prisma.report.count({ where: { status: 'pending' } });
+    const totalTaxpayers = await prisma.user.count({ where: { role: 'taxpayer' } });
+    const activeUsers = await prisma.user.count({ where: { status: 'active' } });
+    const recentAssessments = await prisma.assessment.findMany({
+      take: 5,
+      orderBy: { created_at: 'desc' },
+      include: {
+        user: { select: { first_name: true, last_name: true, email: true } },
+        property: { select: { property_number: true, address: true } }
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Staff Dashboard',
+      data: {
+        dashboard: 'Staff Dashboard',
+        summary: {
+          pendingReports,
+          totalTaxpayers,
+          activeUsers,
+          recentAssessments: recentAssessments.length
+        },
+        recentAssessments,
+        user: {
+          id: userId,
+          role: user.role,
+          status: user.status
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Staff dashboard error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load staff dashboard'
     });
   }
 });

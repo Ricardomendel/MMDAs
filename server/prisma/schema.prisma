@@ -1,0 +1,184 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                Int       @id @default(autoincrement())
+  email             String    @unique
+  phone             String    @unique
+  password_hash     String
+  first_name        String
+  last_name         String
+  middle_name       String?
+  ghana_card_number String?
+  date_of_birth     DateTime?
+  gender            String?
+  address           String?
+  city              String?
+  region            String?
+  postal_code       String?
+  role              String    @default("taxpayer")
+  status            String    @default("pending")
+  mmda_id           Int?
+  profile_image_url String?
+  email_verified    Boolean   @default(false)
+  phone_verified    Boolean   @default(false)
+  email_verified_at DateTime?
+  phone_verified_at DateTime?
+  login_attempts    Int       @default(0)
+  locked_until      DateTime?
+  last_login_at     DateTime?
+  last_login_ip     String?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  // Relations
+  mmda             MMDA?           @relation(fields: [mmda_id], references: [id])
+  assessments      Assessment[]
+  payments         Payment[]
+  notifications    Notification[]
+  reports          Report[]
+
+  @@map("users")
+}
+
+model MMDA {
+  id          Int      @id @default(autoincrement())
+  name        String
+  code        String   @unique
+  region      String
+  address     String?
+  phone       String?
+  email       String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // Relations
+  users             User[]
+  assessments       Assessment[]
+  properties        Property[]
+  revenue_categories RevenueCategory[]
+
+  @@map("mmdas")
+}
+
+model RevenueCategory {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  rate        Float
+  mmda_id     Int
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // Relations
+  mmda        MMDA     @relation(fields: [mmda_id], references: [id])
+  assessments Assessment[]
+
+  @@map("revenue_categories")
+}
+
+model Property {
+  id              Int      @id @default(autoincrement())
+  property_number String   @unique
+  address         String
+  property_type   String
+  owner_name      String
+  owner_phone    String?
+  owner_email    String?
+  mmda_id        Int
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  // Relations
+  mmda           MMDA           @relation(fields: [mmda_id], references: [id])
+  assessments    Assessment[]
+
+  @@map("properties")
+}
+
+model Assessment {
+  id                Int      @id @default(autoincrement())
+  assessment_number String   @unique
+  property_id       Int
+  revenue_category_id Int
+  amount            Float
+  due_date          DateTime
+  status            String   @default("pending")
+  user_id           Int
+  mmda_id           Int
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  // Relations
+  property         Property       @relation(fields: [property_id], references: [id])
+  revenue_category RevenueCategory @relation(fields: [revenue_category_id], references: [id])
+  user             User           @relation(fields: [user_id], references: [id])
+  mmda             MMDA           @relation(fields: [mmda_id], references: [id])
+  payments         Payment[]
+
+  @@map("assessments")
+}
+
+model Payment {
+  id                Int      @id @default(autoincrement())
+  payment_reference String   @unique
+  assessment_id     Int
+  amount            Float
+  payment_method    String
+  status            String   @default("pending")
+  user_id           Int
+  transaction_id    String?
+  receipt_url       String?
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+
+  // Relations
+  assessment Assessment @relation(fields: [assessment_id], references: [id])
+  user       User       @relation(fields: [user_id], references: [id])
+
+  @@map("payments")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  user_id   Int
+  title     String
+  message   String
+  type      String
+  read      Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("notifications")
+}
+
+model Report {
+  id          Int      @id @default(autoincrement())
+  user_id     Int
+  title       String
+  content     String
+  type        String
+  status      String   @default("pending")
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id])
+
+  @@map("reports")
+}

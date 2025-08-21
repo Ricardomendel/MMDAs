@@ -3,7 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { authMiddleware } from '../middleware/auth';
 import { PaymentService, PaymentRequest } from '../services/paymentService';
 import { logger } from '../utils/logger';
-import { db } from '../config/database';
+import { prisma } from '../config/prisma';
 
 const router = Router();
 
@@ -33,37 +33,9 @@ const validatePayment = [
 // Get all payments
 router.get('/', authMiddleware, async (_req: Request, res: Response) => {
   try {
-    let payments;
-    try {
-      payments = await db('payments')
-        .select('*')
-        .orderBy('created_at', 'desc');
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock payments:', dbError);
-      // Return mock payments for development
-      payments = [
-        {
-          id: 1,
-          payment_reference: 'PAY_001',
-          amount: 1500.00,
-          payment_method: 'mobile_money',
-          payment_provider: 'MTN',
-          status: 'completed',
-          description: 'Property Tax Payment',
-          created_at: new Date('2024-08-13')
-        },
-        {
-          id: 2,
-          payment_reference: 'PAY_002',
-          amount: 2500.00,
-          payment_method: 'bank_transfer',
-          payment_provider: 'GCB Bank',
-          status: 'processing',
-          description: 'Business License Fee',
-          created_at: new Date('2024-08-12')
-        }
-      ];
-    }
+    const payments = await prisma.payment.findMany({
+      orderBy: { created_at: 'desc' }
+    });
 
     return res.json({
       success: true, 
@@ -90,26 +62,9 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
       });
     }
     
-    let payment;
-    try {
-      payment = await db('payments')
-        .select('*')
-        .where('id', id)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock payment:', dbError);
-      // Return mock payment for development
-      payment = {
-        id: parseInt(id),
-        payment_reference: `PAY_${id.padStart(3, '0')}`,
-        amount: 1500.00,
-        payment_method: 'mobile_money',
-        payment_provider: 'MTN',
-        status: 'completed',
-        description: 'Property Tax Payment',
-        created_at: new Date('2024-08-13')
-      };
-    }
+    const payment = await prisma.payment.findFirst({
+      where: { id: parseInt(id) }
+    });
 
     if (!payment) {
       return res.status(404).json({
@@ -156,40 +111,18 @@ router.post('/', authMiddleware, validatePayment, async (req: Request, res: Resp
     }
 
     // Save payment to database
-    let savedPayment;
-    try {
-      const [newPayment] = await db('payments').insert({
+    const savedPayment = await prisma.payment.create({
+      data: {
         payment_reference: paymentResponse.reference,
-        external_reference: paymentResponse.transactionId,
-        payment_method: paymentResponse.paymentMethod,
-        payment_provider: paymentResponse.provider || 'Unknown',
+        assessment_id: 1, // TODO: Get actual assessment_id from request
         amount: paymentResponse.amount,
-        fee: paymentResponse.fee,
-        total_amount: paymentResponse.totalAmount,
-        status: paymentResponse.status,
-        description: paymentRequest.description,
-        payment_details: JSON.stringify(paymentResponse.metadata || {}),
-        created_at: new Date()
-      }).returning('*');
-      
-      savedPayment = newPayment;
-    } catch (dbError) {
-      logger.warn('Database insert failed, payment processed but not saved:', dbError);
-      // Payment was processed but couldn't be saved to database
-      savedPayment = {
-        id: Date.now(),
-        payment_reference: paymentResponse.reference,
-        external_reference: paymentResponse.transactionId,
         payment_method: paymentResponse.paymentMethod,
-        payment_provider: paymentResponse.provider || 'Unknown',
-        amount: paymentResponse.amount,
-        fee: paymentResponse.fee,
-        total_amount: paymentResponse.totalAmount,
         status: paymentResponse.status,
-        description: paymentRequest.description,
+        user_id: (req as any).user.id,
+        transaction_id: paymentResponse.transactionId || null,
         created_at: new Date()
-      };
-    }
+      }
+    });
 
     logger.info(`Payment processed successfully: ${paymentResponse.reference}, method: ${paymentResponse.paymentMethod}`);
 
@@ -225,10 +158,9 @@ router.get('/:id/status', authMiddleware, async (req: Request, res: Response) =>
     // Get payment from database
     let payment;
     try {
-      payment = await db('payments')
-        .select('*')
-        .where('id', id)
-        .first();
+      payment = await prisma.payment.findFirst({
+        where: { id: parseInt(id) }
+      });
     } catch (dbError) {
       logger.warn('Database query failed, using mock payment:', dbError);
       payment = {
@@ -248,7 +180,7 @@ router.get('/:id/status', authMiddleware, async (req: Request, res: Response) =>
 
     // Check status with payment provider
     const statusResponse = await paymentService.checkPaymentStatus(
-      payment.external_reference || payment.payment_reference,
+      payment.transaction_id || payment.payment_reference,
       payment.payment_method
     );
 
@@ -256,12 +188,13 @@ router.get('/:id/status', authMiddleware, async (req: Request, res: Response) =>
       // Update payment status in database if it changed
       if (statusResponse.status !== payment.status) {
         try {
-          await db('payments')
-            .where('id', id)
-            .update({ 
+          await prisma.payment.update({
+            where: { id: parseInt(id) },
+            data: { 
               status: statusResponse.status,
               updated_at: new Date()
-            });
+            }
+          });
         } catch (dbError) {
           logger.warn('Failed to update payment status in database:', dbError);
         }
@@ -349,19 +282,9 @@ router.post('/:id/cancel', authMiddleware, async (req: Request, res: Response) =
     }
     
     // Get payment from database
-    let payment;
-    try {
-      payment = await db('payments')
-        .select('*')
-        .where('id', id)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock payment:', dbError);
-      payment = {
-        id: parseInt(id),
-        status: 'pending'
-      };
-    }
+    const payment = await prisma.payment.findFirst({
+      where: { id: parseInt(id) }
+    });
 
     if (!payment) {
       return res.status(404).json({
@@ -379,12 +302,13 @@ router.post('/:id/cancel', authMiddleware, async (req: Request, res: Response) =
 
     // Update payment status to cancelled
     try {
-      await db('payments')
-        .where('id', id)
-        .update({ 
+      await prisma.payment.update({
+        where: { id: parseInt(id) },
+        data: { 
           status: 'cancelled',
           updated_at: new Date()
-        });
+        }
+      });
     } catch (dbError) {
       logger.warn('Failed to update payment status in database:', dbError);
     }

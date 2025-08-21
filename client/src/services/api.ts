@@ -238,9 +238,17 @@ export const adminAPI = {
   getSystemStats: () =>
     api.get('/admin/stats'),
     
+  // Staff dashboard
+  getStaffDashboard: () =>
+    api.get('/auth/staff/dashboard'),
+    
   // User management
   getUsers: () =>
     api.get('/admin/users'),
+    
+  // Staff-specific user management (only taxpayers)
+  getUsersForStaff: () =>
+    api.get('/admin/users/staff'),
     
   getUser: (id: string) =>
     api.get(`/admin/users/${id}`),
@@ -268,6 +276,10 @@ export const adminAPI = {
   // Activities and notifications
   getRecentActivities: () =>
     api.get('/admin/activities'),
+    
+  // Staff-specific activities (only taxpayer-related)
+  getRecentActivitiesForStaff: () =>
+    api.get('/admin/activities/staff'),
     
   sendAuthorizationEmail: (data: any) =>
     api.post('/admin/send-authorization-email', data),

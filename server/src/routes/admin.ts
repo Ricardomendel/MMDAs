@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware, requireRole } from '../middleware/auth';
 import { body, validationResult } from 'express-validator';
 import bcrypt from 'bcryptjs';
-import { db, mockDb } from '../config/database';
+import { prisma } from '../config/prisma';
 import { logger } from '../utils/logger';
 
 // Extend Request interface to include user property
@@ -41,30 +41,78 @@ const validateUserUpdate = [
 // Get all users (admin only)
 router.get('/users', authMiddleware, requireRole(['admin', 'super_admin']), async (_req: Request, res: Response) => {
   try {
-    let users;
-    try {
-      users = await db('users')
-        .select('id', 'email', 'first_name', 'last_name', 'phone', 'role', 'status', 'created_at', 'last_login_at')
-        .orderBy('created_at', 'desc');
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
-      // Return mock users for development
-      users = [
-        { id: 1, email: 'admin@mmda.com', first_name: 'Admin', last_name: 'User', phone: '+233200000000', role: 'admin', status: 'active', created_at: new Date('2024-01-01'), last_login_at: new Date() },
-        { id: 2, email: 'taxpayer@example.com', first_name: 'John', last_name: 'Doe', phone: '+233200000001', role: 'taxpayer', status: 'active', created_at: new Date('2024-01-01'), last_login_at: new Date() },
-        { id: 3, email: 'staff@mmda.com', first_name: 'Jane', last_name: 'Smith', phone: '+233200000002', role: 'staff', status: 'active', created_at: new Date('2024-01-01'), last_login_at: new Date() }
-      ];
-    }
+    logger.info('Fetching all users for admin user');
+    
+    // Use Prisma to fetch users
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        phone: true,
+        role: true,
+        status: true,
+        created_at: true,
+        last_login_at: true
+      },
+      orderBy: {
+        created_at: 'desc'
+      }
+    });
+    
+    logger.info(`Found ${users.length} users in database`);
 
     res.json({ 
       success: true, 
       data: users 
     });
   } catch (error) {
-    logger.error('Error fetching users:', error);
+    logger.error('Error fetching users from database:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Error fetching users' 
+      message: 'Error fetching users from database' 
+    });
+  }
+});
+
+// Get users for staff (staff can only see taxpayers)
+router.get('/users/staff', authMiddleware, requireRole(['staff']), async (_req: Request, res: Response) => {
+  try {
+    logger.info('Fetching taxpayers for staff user');
+    
+    // Use Prisma to fetch only taxpayer users
+    const users = await prisma.user.findMany({
+      where: {
+        role: 'taxpayer'
+      },
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        phone: true,
+        role: true,
+        status: true,
+        created_at: true,
+        last_login_at: true
+      },
+      orderBy: {
+        created_at: 'desc'
+      }
+    });
+    
+    logger.info(`Found ${users.length} taxpayers in database`);
+    
+    res.json({ 
+      success: true, 
+      data: users 
+    });
+  } catch (error) {
+    logger.error('Error fetching users for staff from database:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Error fetching users from database' 
     });
   }
 });
@@ -99,17 +147,15 @@ router.post('/users', authMiddleware, requireRole(['admin', 'super_admin']), val
       postal_code
     } = req.body;
 
-    // Check if user already exists
-    let existingUser;
-    try {
-      existingUser = await db('users')
-        .where('email', email)
-        .orWhere('phone', phone)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
-      existingUser = mockDb.users.where('email', email).first() || mockDb.users.where('phone', phone).first();
-    }
+    // Check if user already exists using Prisma
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: email },
+          { phone: phone }
+        ]
+      }
+    });
 
     if (existingUser) {
       return res.status(409).json({
@@ -122,33 +168,9 @@ router.post('/users', authMiddleware, requireRole(['admin', 'super_admin']), val
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user
-    let newUser;
-    try {
-      const [createdUser] = await db('users')
-        .insert({
-          email,
-          phone,
-          password_hash: passwordHash,
-          first_name,
-          last_name,
-          middle_name,
-          role,
-          status,
-          ghana_card_number,
-          date_of_birth,
-          gender,
-          address,
-          city,
-          region,
-          postal_code
-        })
-        .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status', 'created_at']);
-
-      newUser = createdUser;
-    } catch (dbError) {
-      logger.warn('Database insert failed, using mock database:', dbError);
-      const mockResult = mockDb.users.insert({
+    // Create user using Prisma
+    const newUser = await prisma.user.create({
+      data: {
         email,
         phone,
         password_hash: passwordHash,
@@ -164,10 +186,17 @@ router.post('/users', authMiddleware, requireRole(['admin', 'super_admin']), val
         city,
         region,
         postal_code
-      }).returning(['id', 'email', 'first_name', 'last_name', 'role', 'status', 'created_at']);
-      
-      newUser = mockResult[0];
-    }
+      },
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        role: true,
+        status: true,
+        created_at: true
+      }
+    });
 
     logger.info(`Admin ${req.user?.email} created new user: ${email} with role: ${role}`);
 
@@ -197,16 +226,22 @@ router.get('/users/:id', authMiddleware, requireRole(['admin', 'super_admin']), 
       });
     }
     
-    let user;
-    try {
-      user = await db('users')
-        .select('id', 'email', 'first_name', 'last_name', 'phone', 'role', 'status', 'created_at', 'last_login_at', 'mmda_id')
-        .where('id', id)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
-      user = mockDb.users.where('id', parseInt(id)).first();
-    }
+    // Get user using Prisma
+    const user = await prisma.user.findFirst({
+      where: { id: parseInt(id) },
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        phone: true,
+        role: true,
+        status: true,
+        created_at: true,
+        last_login_at: true,
+        mmda_id: true
+      }
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -255,16 +290,10 @@ router.put('/users/:id', authMiddleware, requireRole(['admin', 'super_admin']), 
     delete updateData.id;
     delete updateData.created_at;
 
-    // Check if user exists
-    let existingUser;
-    try {
-      existingUser = await db('users')
-        .where('id', id)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
-      existingUser = mockDb.users.where('id', parseInt(id)).first();
-    }
+    // Check if user exists using Prisma
+    const existingUser = await prisma.user.findFirst({
+      where: { id: parseInt(id) }
+    });
 
     if (!existingUser) {
       return res.status(404).json({
@@ -273,20 +302,20 @@ router.put('/users/:id', authMiddleware, requireRole(['admin', 'super_admin']), 
       });
     }
 
-    // Update user
-    let updatedUser;
-    try {
-      const [user] = await db('users')
-        .where('id', id)
-        .update(updateData)
-        .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status', 'updated_at']);
-
-      updatedUser = user;
-    } catch (dbError) {
-      logger.warn('Database update failed, using mock database:', dbError);
-      mockDb.users.where('id', parseInt(id)).update(updateData);
-      updatedUser = { id: parseInt(id), ...updateData, updated_at: new Date() };
-    }
+    // Update user using Prisma
+    const updatedUser = await prisma.user.update({
+      where: { id: parseInt(id) },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        role: true,
+        status: true,
+        updated_at: true
+      }
+    });
 
     logger.info(`Admin ${req.user?.email} updated user: ${id}`);
 
@@ -316,16 +345,10 @@ router.delete('/users/:id', authMiddleware, requireRole(['admin', 'super_admin']
       });
     }
     
-    // Check if user exists
-    let existingUser;
-    try {
-      existingUser = await db('users')
-        .where('id', id)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
-      existingUser = mockDb.users.where('id', parseInt(id)).first();
-    }
+    // Check if user exists using Prisma
+    const existingUser = await prisma.user.findFirst({
+      where: { id: parseInt(id) }
+    });
 
     if (!existingUser) {
       return res.status(404).json({
@@ -342,16 +365,10 @@ router.delete('/users/:id', authMiddleware, requireRole(['admin', 'super_admin']
       });
     }
 
-    // Delete user
-    try {
-      await db('users')
-        .where('id', id)
-        .del();
-    } catch (dbError) {
-      logger.warn('Database delete failed, using mock database:', dbError);
-      // Mock database doesn't have delete functionality, so we'll just log it
-      logger.info(`Mock delete for user ${id}`);
-    }
+    // Delete user using Prisma
+    await prisma.user.delete({
+      where: { id: parseInt(id) }
+    });
 
     logger.info(`Admin ${req.user?.email} deleted user: ${id}`);
 
@@ -371,58 +388,46 @@ router.delete('/users/:id', authMiddleware, requireRole(['admin', 'super_admin']
 // Get system statistics
 router.get('/stats', authMiddleware, requireRole(['admin', 'super_admin']), async (_req: Request, res: Response) => {
   try {
-    let stats;
-    try {
-      // Get real user counts
-      const userCountResult = await db('users').count('* as total');
-      const activeUserCountResult = await db('users').where('status', 'active').count('* as total');
-      const pendingUserCountResult = await db('users').where('status', 'pending').count('* as total');
-      
-      // Get revenue data (from payments table)
-      const revenueResult = await db('payments').sum('amount as total');
-      const pendingPaymentsResult = await db('payments').where('status', 'pending').sum('amount as total');
-      
-      // Get property counts
-      const propertyCountResult = await db('properties').count('* as total');
-      
-      const userCount = userCountResult[0];
-      const activeUserCount = activeUserCountResult[0];
-      const pendingUserCount = pendingUserCountResult[0];
-      const revenue = revenueResult[0];
-      const pendingPayments = pendingPaymentsResult[0];
-      const propertyCount = propertyCountResult[0];
-      
-      stats = {
-        totalUsers: parseInt(userCount?.['total'] as string || '0'),
-        activeUsers: parseInt(activeUserCount?.['total'] as string || '0'),
-        pendingUsers: parseInt(pendingUserCount?.['total'] as string || '0'),
-        totalRevenue: parseFloat(revenue?.['total'] as string || '0'),
-        pendingPayments: parseFloat(pendingPayments?.['total'] as string || '0'),
-        totalProperties: parseInt(propertyCount?.['total'] as string || '0'),
-        totalPayments: 0, // Will be implemented when payments table is ready
-      };
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock statistics:', dbError);
-      stats = {
-        totalUsers: 3,
-        activeUsers: 3,
-        pendingUsers: 0,
-        totalRevenue: 2450000,
-        pendingPayments: 180000,
-        totalProperties: 890,
-        totalPayments: 180000,
-      };
-    }
+    logger.info('Fetching system statistics for admin user');
+    
+    // Get real user counts using Prisma
+    const totalUsers = await prisma.user.count();
+    const activeUsers = await prisma.user.count({ where: { status: 'active' } });
+    const pendingUsers = await prisma.user.count({ where: { status: 'pending' } });
+    
+    // Get revenue data (from payments table) using Prisma
+    const totalRevenue = await prisma.payment.aggregate({
+      _sum: { amount: true }
+    });
+    const pendingPayments = await prisma.payment.aggregate({
+      where: { status: 'pending' },
+      _sum: { amount: true }
+    });
+    
+    // Get property counts using Prisma
+    const totalProperties = await prisma.property.count();
+    
+    const stats = {
+      totalUsers,
+      activeUsers,
+      pendingUsers,
+      totalRevenue: totalRevenue._sum.amount || 0,
+      pendingPayments: pendingPayments._sum.amount || 0,
+      totalProperties,
+      totalPayments: 0, // Will be implemented when payments table is ready
+    };
+
+    logger.info(`System stats: ${stats.totalUsers} users, ${stats.activeUsers} active, ${stats.totalRevenue} revenue`);
 
     return res.json({ 
       success: true, 
       data: stats 
     });
   } catch (error) {
-    logger.error('Error fetching statistics:', error);
+    logger.error('Error fetching statistics from database:', error);
     return res.status(500).json({ 
       success: false, 
-      message: 'Error fetching statistics' 
+      message: 'Error fetching statistics from database' 
     });
   }
 });
@@ -430,20 +435,12 @@ router.get('/stats', authMiddleware, requireRole(['admin', 'super_admin']), asyn
 // Get revenue categories
 router.get('/revenue-categories', authMiddleware, requireRole(['admin', 'super_admin']), async (_req: Request, res: Response) => {
   try {
-    let categories;
-    try {
-      categories = await db('revenue_categories')
-        .select('*')
-        .orderBy('name', 'asc');
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock revenue categories:', dbError);
-      categories = [
-        { id: 1, name: 'Property Tax', description: 'Annual property tax collection', rate: 0.5, status: 'active' },
-        { id: 2, name: 'Business License', description: 'Business operating licenses', rate: 1000, status: 'active' },
-        { id: 3, name: 'Building Permit', description: 'Construction and renovation permits', rate: 500, status: 'active' },
-        { id: 4, name: 'Market Fees', description: 'Market stall and trading fees', rate: 200, status: 'active' }
-      ];
-    }
+    // Use Prisma to fetch revenue categories
+    const categories = await prisma.revenueCategory.findMany({
+      orderBy: {
+        name: 'asc'
+      }
+    });
 
     return res.json({
       success: true,
@@ -475,18 +472,12 @@ router.post('/revenue-categories', authMiddleware, requireRole(['admin', 'super_
       });
     }
 
-    const { name, description, rate, status } = req.body;
+    const { name, description, rate, mmda_id } = req.body;
 
-    let newCategory;
-    try {
-      const [createdCategory] = await db('revenue_categories')
-        .insert({ name, description, rate, status })
-        .returning('*');
-      newCategory = createdCategory;
-    } catch (dbError) {
-      logger.warn('Database insert failed, using mock database:', dbError);
-      newCategory = { id: Date.now(), name, description, rate, status, created_at: new Date() };
-    }
+    // Create revenue category using Prisma
+    const newCategory = await prisma.revenueCategory.create({
+      data: { name, description, rate, mmda_id: parseInt(mmda_id) }
+    });
 
     return res.status(201).json({
       success: true,
@@ -507,26 +498,25 @@ router.get('/properties', authMiddleware, requireRole(['admin', 'super_admin']),
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     
-    let properties;
-    try {
-      let query = db('properties').select('*');
-      
-      if (search) {
-        query = query.where('address', 'like', `%${search}%`)
-                    .orWhere('property_id', 'like', `%${search}%`);
-      }
-      
-      properties = await query
-        .orderBy('created_at', 'desc')
-        .limit(limit as number)
-        .offset(((page as number) - 1) * (limit as number));
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock properties:', dbError);
-      properties = [
-        { id: 1, property_id: 'PRP-2024-001', address: '123 Main Street', owner_name: 'John Doe', status: 'active', created_at: new Date() },
-        { id: 2, property_id: 'PRP-2024-002', address: '456 Oak Avenue', owner_name: 'Jane Smith', status: 'active', created_at: new Date() }
-      ];
+    // Use Prisma to fetch properties
+    let whereClause = {};
+    if (search) {
+      whereClause = {
+        OR: [
+          { address: { contains: search as string } },
+          { property_number: { contains: search as string } }
+        ]
+      };
     }
+    
+    const properties = await prisma.property.findMany({
+      where: whereClause,
+      orderBy: {
+        created_at: 'desc'
+      },
+      take: parseInt(limit as string),
+      skip: (parseInt(page as string) - 1) * parseInt(limit as string)
+    });
 
     return res.json({
       success: true,
@@ -544,54 +534,109 @@ router.get('/properties', authMiddleware, requireRole(['admin', 'super_admin']),
 // Get recent activities
 router.get('/activities', authMiddleware, requireRole(['admin', 'super_admin']), async (_req: Request, res: Response) => {
   try {
-    let activities;
-    try {
-      // Get recent user registrations
-      const recentUsers = await db('users')
-        .select('id', 'email', 'first_name', 'last_name', 'created_at')
-        .orderBy('created_at', 'desc')
-        .limit(5);
+    logger.info('Fetching recent activities for admin user');
+    
+    // Get recent user registrations using Prisma
+    const recentUsers = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        created_at: true
+      },
+      orderBy: {
+        created_at: 'desc'
+      },
+      take: 5
+    });
 
-      // Get recent payments
-      const recentPayments = await db('payments')
-        .select('id', 'amount', 'status', 'created_at')
-        .orderBy('created_at', 'desc')
-        .limit(5);
+    // Get recent payments using Prisma
+    const recentPayments = await prisma.payment.findMany({
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        created_at: true
+      },
+      orderBy: {
+        created_at: 'desc'
+      },
+      take: 5
+    });
 
-      activities = [
-        ...recentUsers.map(user => ({
-          type: 'user_registration',
-          message: `New user registration: ${user.first_name} ${user.last_name}`,
-          timestamp: user.created_at,
-          data: user
-        })),
-        ...recentPayments.map(payment => ({
-          type: 'payment_received',
-          message: `Payment received: ₵${payment.amount}`,
-          timestamp: payment.created_at,
-          data: payment
-        }))
-      ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-       .slice(0, 10);
+    const activities = [
+      ...recentUsers.map(user => ({
+        type: 'user_registration',
+        message: `New user registration: ${user.first_name} ${user.last_name}`,
+        timestamp: user.created_at,
+        data: user
+      })),
+      ...recentPayments.map(payment => ({
+        type: 'payment_received',
+        message: `Payment received: ₵${payment.amount}`,
+        timestamp: payment.created_at,
+        data: payment
+      }))
+    ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+     .slice(0, 10);
 
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock activities:', dbError);
-      activities = [
-        { type: 'user_registration', message: 'New user registration: John Doe', timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000) },
-        { type: 'payment_received', message: 'Payment received: ₵500', timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000) },
-        { type: 'user_registration', message: 'New user registration: Jane Smith', timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000) }
-      ];
-    }
+    logger.info(`Found ${activities.length} recent activities`);
 
     return res.json({
       success: true,
       data: activities
     });
   } catch (error) {
-    logger.error('Error fetching activities:', error);
+    logger.error('Error fetching activities from database:', error);
     return res.status(500).json({
       success: false,
-      message: 'Error fetching activities'
+      message: 'Error fetching activities from database'
+    });
+  }
+});
+
+// Get recent activities for staff (staff can only see taxpayer-related activities)
+router.get('/activities/staff', authMiddleware, requireRole(['staff']), async (_req: Request, res: Response) => {
+  try {
+    logger.info('Fetching recent taxpayer activities for staff user');
+    
+    // Get recent taxpayer registrations only using Prisma
+    const recentUsers = await prisma.user.findMany({
+      where: {
+        role: 'taxpayer'
+      },
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        created_at: true
+      },
+      orderBy: {
+        created_at: 'desc'
+      },
+      take: 5
+    });
+
+    const activities = recentUsers.map(user => ({
+      type: 'user_registration',
+      message: `New taxpayer registration: ${user.first_name} ${user.last_name}`,
+      timestamp: user.created_at,
+      data: user
+    }));
+
+    logger.info(`Found ${activities.length} recent taxpayer activities`);
+
+    return res.json({
+      success: true,
+      data: activities
+    });
+  } catch (error) {
+    logger.error('Error fetching activities for staff from database:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Error fetching activities from database'
     });
   }
 });
@@ -613,14 +658,10 @@ router.post('/send-authorization-email', authMiddleware, requireRole(['admin', '
 
     const { userId, type, customMessage } = req.body;
 
-    // Get user details
-    let user;
-    try {
-      user = await db('users').where('id', userId).first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock user:', dbError);
-      user = { id: userId, email: 'user@example.com', first_name: 'User', last_name: 'Name' };
-    }
+    // Get user details using Prisma
+    const user = await prisma.user.findFirst({
+      where: { id: parseInt(userId) }
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -693,11 +734,17 @@ router.post('/bulk-user-operations', authMiddleware, requireRole(['admin', 'supe
       try {
         switch (operation) {
           case 'activate':
-            await db('users').where('id', userId).update({ status: 'active' });
+            await prisma.user.update({
+              where: { id: userId },
+              data: { status: 'active' }
+            });
             results.push({ userId, success: true, message: 'User activated' });
             break;
           case 'deactivate':
-            await db('users').where('id', userId).update({ status: 'inactive' });
+            await prisma.user.update({
+              where: { id: userId },
+              data: { status: 'inactive' }
+            });
             results.push({ userId, success: true, message: 'User deactivated' });
             break;
           case 'send_welcome_email':
@@ -705,7 +752,9 @@ router.post('/bulk-user-operations', authMiddleware, requireRole(['admin', 'supe
             results.push({ userId, success: true, message: 'Welcome email sent' });
             break;
           case 'delete':
-            await db('users').where('id', userId).del();
+            await prisma.user.delete({
+              where: { id: userId }
+            });
             results.push({ userId, success: true, message: 'User deleted' });
             break;
         }
