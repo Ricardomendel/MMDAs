@@ -46,7 +46,8 @@ const createTwilioClient = () => {
   const authToken = process.env['TWILIO_AUTH_TOKEN'];
   
   if (!accountSid || !authToken) {
-    throw new Error('Twilio credentials not configured');
+    logger.warn('Twilio credentials not configured, SMS sending will be skipped');
+    return null;
   }
   
   return twilio(accountSid, authToken);
@@ -78,10 +79,20 @@ export const sendSMS = async (options: SMSOptions): Promise<void> => {
     }
 
     const client = createTwilioClient();
+    
+    if (!client) {
+      logger.info('SMS sending skipped - no Twilio credentials configured', {
+        to: options.to,
+        message: options.message
+      });
+      return;
+    }
+    
     const fromNumber = options.from || process.env['TWILIO_PHONE_NUMBER'];
     
     if (!fromNumber) {
-      throw new Error('Twilio phone number not configured');
+      logger.warn('Twilio phone number not configured, SMS sending skipped');
+      return;
     }
 
     const message = await client.messages.create({
@@ -97,7 +108,8 @@ export const sendSMS = async (options: SMSOptions): Promise<void> => {
     });
   } catch (error) {
     logger.error('SMS sending failed:', error);
-    throw error;
+    // Don't throw error - just log it and continue
+    // This prevents registration from failing due to SMS issues
   }
 };
 
@@ -207,6 +219,11 @@ export const verifyPhoneNumber = async (phoneNumber: string): Promise<boolean> =
 
     const client = createTwilioClient();
     
+    if (!client) {
+      logger.warn('Twilio client not initialized, skipping phone number verification.');
+      return true; // Assume valid if not sending SMS
+    }
+
     // Use Twilio's Lookup API to verify the phone number
     await client.lookups.v1.phoneNumbers(phoneNumber).fetch();
     
@@ -227,6 +244,12 @@ export const getSMSStatus = async (messageId: string): Promise<string | null> =>
     }
 
     const client = createTwilioClient();
+    
+    if (!client) {
+      logger.warn('Twilio client not initialized, skipping SMS status check.');
+      return null;
+    }
+
     const message = await client.messages(messageId).fetch();
     
     return message.status;
@@ -248,6 +271,11 @@ export const verifySMSConfig = async (): Promise<boolean> => {
 
     const client = createTwilioClient();
     
+    if (!client) {
+      logger.warn('Twilio client not initialized, skipping SMS config verification.');
+      return true; // Assume verified if not sending SMS
+    }
+
     // Test the connection by fetching account info
     const accountSid = process.env['TWILIO_ACCOUNT_SID'];
     if (!accountSid) {

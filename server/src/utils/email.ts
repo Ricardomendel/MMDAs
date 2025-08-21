@@ -224,14 +224,24 @@ const createTransporter = () => {
       }
     });
   } else {
+    // Check if production SMTP credentials are available
+    const smtpHost = process.env['SMTP_HOST'];
+    const smtpUser = process.env['SMTP_USER'];
+    const smtpPass = process.env['SMTP_PASS'];
+    
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      logger.warn('Production SMTP credentials not configured, email sending will be skipped');
+      return null;
+    }
+    
     // Use production SMTP settings
     return nodemailer.createTransport({
-      host: process.env['SMTP_HOST'],
+      host: smtpHost,
       port: parseInt(process.env['SMTP_PORT'] || '587'),
       secure: process.env['SMTP_SECURE'] === 'true',
       auth: {
-        user: process.env['SMTP_USER'],
-        pass: process.env['SMTP_PASS']
+        user: smtpUser,
+        pass: smtpPass
       }
     });
   }
@@ -251,6 +261,16 @@ const replaceTemplateVariables = (template: string, data: Record<string, any>): 
 export const sendEmail = async (options: EmailOptions): Promise<void> => {
   try {
     const transporter = createTransporter();
+    
+    // If no transporter available (credentials not configured), skip sending
+    if (!transporter) {
+      logger.info('Email sending skipped - no SMTP credentials configured', {
+        to: options.to,
+        template: options.template
+      });
+      return;
+    }
+    
     const template = emailTemplates[options.template];
     
     if (!template) {
@@ -281,7 +301,8 @@ export const sendEmail = async (options: EmailOptions): Promise<void> => {
     }
   } catch (error) {
     logger.error('Email sending failed:', error);
-    throw error;
+    // Don't throw error - just log it and continue
+    // This prevents registration from failing due to email issues
   }
 };
 

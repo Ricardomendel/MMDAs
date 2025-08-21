@@ -147,16 +147,28 @@ router.post('/register', validateRegistration, async (req: Request, res: Respons
       user = newUser;
     } catch (dbError) {
       logger.warn('Database insert failed, using mock database:', dbError);
-      // Create mock user
-      const mockUserId = Math.floor(Math.random() * 10000) + 1000;
-      user = {
-        id: mockUserId,
-        email,
-        first_name,
-        last_name,
-        role: 'taxpayer',
-        status: 'pending'
-      };
+      // Create user in mock database and mark active for testing
+      const [createdUser] = mockDb.users
+        .insert({
+          email,
+          phone,
+          password_hash: passwordHash,
+          first_name,
+          last_name,
+          middle_name,
+          ghana_card_number,
+          date_of_birth,
+          gender,
+          address,
+          city,
+          region,
+          postal_code,
+          role: 'taxpayer',
+          status: 'active',
+          email_verified: true
+        })
+        .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status']);
+      user = createdUser;
     }
 
     // Best-effort notifications: do not fail registration if email/SMS fails
