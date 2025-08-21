@@ -54,7 +54,13 @@ export async function connectDatabase(): Promise<void> {
     }
     
     // Fall back to mock database
-    await connectMockDatabase();
+    try {
+      await connectMockDatabase();
+      logger.info('Successfully connected to mock database');
+    } catch (mockError) {
+      logger.error('Failed to connect to mock database:', mockError);
+      throw new Error('Both real and mock database connections failed');
+    }
   }
 }
 

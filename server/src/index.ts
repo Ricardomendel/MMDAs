@@ -25,6 +25,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 import { logger } from './utils/logger';
 import { connectDatabase, hasValidDatabaseConfig } from './config/database';
+import { connectMockDatabase } from './config/mockDatabase';
 import { connectRedis } from './config/redis';
 
 // Load environment variables
@@ -175,14 +176,22 @@ async function startServer() {
       } catch (dbError) {
         const errorMessage = dbError instanceof Error ? dbError.message : 'Unknown database error';
         logger.warn('Database connection failed, running without database:', errorMessage);
-        // The connectDatabase function will automatically fall back to mock database
+        // Try to connect to mock database directly
+        try {
+          await connectMockDatabase();
+          logger.info('Successfully connected to mock database as fallback');
+        } catch (mockError) {
+          logger.error('Failed to connect to mock database:', mockError);
+        }
       }
     } else {
       logger.info('No database configuration found, using mock database');
       try {
-        await connectDatabase(); // This will fall back to mock database
+        await connectMockDatabase();
+        logger.info('Successfully connected to mock database');
       } catch (dbError) {
-        logger.warn('Failed to initialize mock database:', dbError);
+        logger.error('Failed to initialize mock database:', dbError);
+        // Continue anyway - the app should still work
       }
     }
 
