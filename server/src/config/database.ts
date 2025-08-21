@@ -5,11 +5,11 @@ import { mockDb, connectMockDatabase } from './mockDatabase';
 const config = {
   client: 'postgresql',
   connection: {
-    host: process.env['DB_HOST'] || 'localhost',
-    port: parseInt(process.env['DB_PORT'] || '5432'),
-    user: process.env['DB_USER'] || 'postgres',
-    password: process.env['DB_PASSWORD'] || 'password',
-    database: process.env['DB_NAME'] || 'revenue_system',
+    host: process.env['DB_HOST'] || process.env['DATABASE_URL']?.split('@')[1]?.split(':')[0] || 'localhost',
+    port: parseInt(process.env['DB_PORT'] || process.env['DATABASE_URL']?.split(':')[4]?.split('/')[0] || '5432'),
+    user: process.env['DB_USER'] || process.env['DATABASE_URL']?.split('://')[1]?.split(':')[0] || 'postgres',
+    password: process.env['DB_PASSWORD'] || process.env['DATABASE_URL']?.split(':')[2]?.split('@')[0] || 'password',
+    database: process.env['DB_NAME'] || process.env['DATABASE_URL']?.split('/').pop() || 'revenue_system',
     ssl: process.env['NODE_ENV'] === 'production' ? { rejectUnauthorized: false } : false,
   },
   pool: {
@@ -44,8 +44,16 @@ export async function connectDatabase(): Promise<void> {
     logger.info('Database connection established successfully');
   } catch (error) {
     logger.error('Database connection failed:', error);
+    
+    // Check if we're in production and have database credentials
+    if (process.env['NODE_ENV'] === 'production' && process.env['DATABASE_URL']) {
+      logger.warn('Production environment detected but database connection failed. Check DATABASE_URL configuration.');
+      logger.warn('Falling back to mock database temporarily.');
+    } else {
+      logger.info('Development environment detected. Using mock database.');
+    }
+    
     // Fall back to mock database
-    logger.info('Falling back to mock database for development');
     await connectMockDatabase();
   }
 }
@@ -76,10 +84,17 @@ export async function checkDatabaseHealth(): Promise<boolean> {
     // Fall back to mock database health check
     try {
       await mockDb.raw('SELECT 1');
+      logger.info('Mock database health check successful');
       return true;
     } catch (mockError) {
       logger.error('Mock database health check also failed:', mockError);
       return false;
     }
   }
+}
+
+// Check if we have valid database configuration
+export function hasValidDatabaseConfig(): boolean {
+  return !!(process.env['DATABASE_URL'] || 
+    (process.env['DB_HOST'] && process.env['DB_USER'] && process.env['DB_PASSWORD'] && process.env['DB_NAME']));
 }

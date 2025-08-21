@@ -24,7 +24,7 @@ import adminRoutes from './routes/admin';
 import { errorHandler } from './middleware/errorHandler';
 import { authMiddleware } from './middleware/auth';
 import { logger } from './utils/logger';
-import { connectDatabase } from './config/database';
+import { connectDatabase, hasValidDatabaseConfig } from './config/database';
 import { connectRedis } from './config/redis';
 
 // Load environment variables
@@ -167,13 +167,23 @@ if (process.env['NODE_ENV'] === 'production') {
 async function startServer() {
   try {
     // Connect to database (optional for development)
-    try {
-      await connectDatabase();
-      logger.info('Database connected successfully');
-    } catch (dbError) {
-      const errorMessage = dbError instanceof Error ? dbError.message : 'Unknown database error';
-      logger.warn('Database connection failed, running without database:', errorMessage);
-      // The connectDatabase function will automatically fall back to mock database
+    if (hasValidDatabaseConfig()) {
+      logger.info('Database configuration detected, attempting connection...');
+      try {
+        await connectDatabase();
+        logger.info('Database connected successfully');
+      } catch (dbError) {
+        const errorMessage = dbError instanceof Error ? dbError.message : 'Unknown database error';
+        logger.warn('Database connection failed, running without database:', errorMessage);
+        // The connectDatabase function will automatically fall back to mock database
+      }
+    } else {
+      logger.info('No database configuration found, using mock database');
+      try {
+        await connectDatabase(); // This will fall back to mock database
+      } catch (dbError) {
+        logger.warn('Failed to initialize mock database:', dbError);
+      }
     }
 
     // Connect to Redis (optional for development)
