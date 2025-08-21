@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: mmda-revenue-server
+    env: node
+    plan: free
+    buildCommand: cd server && npm install && npm run build
+    startCommand: cd server && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        sync: false  # This will be set manually in Render dashboard
+      - key: JWT_SECRET
+        sync: false  # This will be set manually in Render dashboard
+      - key: CLIENT_URL
+        value: https://your-frontend-domain.com  # Update this with your actual frontend URL
+    healthCheckPath: /health
+    autoDeploy: true
