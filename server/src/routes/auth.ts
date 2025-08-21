@@ -45,19 +45,21 @@ const customValidateLogin = (req: Request, res: Response, next: Function) => {
   }
   
   next();
+  return;
 };
 
-const validateLogin = [
-  body('email')
-    .trim()
-    .isEmail()
-    .withMessage('Please provide a valid email address')
-    .normalizeEmail(),
-  body('password')
-    .trim()
-    .notEmpty()
-    .withMessage('Password is required'),
-];
+// validateLogin commented out - using customValidateLogin instead
+// const validateLogin = [
+//   body('email')
+//     .trim()
+//     .isEmail()
+//     .withMessage('Please provide a valid email address')
+//     .normalizeEmail(),
+//   body('password')
+//     .trim()
+//     .notEmpty()
+//     .withMessage('Password is required'),
+// ];
 
 const validatePasswordReset = [
   body('email').isEmail().normalizeEmail(),

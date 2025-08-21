@@ -74,14 +74,14 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 
-// More permissive rate limiting for auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 2000, // allow more requests for authentication
-  message: 'Too many authentication requests, please try again later.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// More permissive rate limiting for auth endpoints (commented out for debugging)
+// const authLimiter = rateLimit({
+//   windowMs: 15 * 60 * 1000, // 15 minutes
+//   max: 2000, // allow more requests for authentication
+//   message: 'Too many authentication requests, please try again later.',
+//   standardHeaders: true,
+//   legacyHeaders: false,
+// });
 
 // const speedLimiter = slowDown({
 //   windowMs: 15 * 60 * 1000, // 15 minutes
