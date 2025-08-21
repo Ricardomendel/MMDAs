@@ -14,10 +14,13 @@ jobs:
   # Build and test the application
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      NODE_ENV: test
     
     strategy:
       matrix:
-        node-version: [16.x, 18.x, 20.x]
+        node-version: [18.x, 20.x]
     
     steps:
     - name: Checkout code
@@ -31,6 +34,18 @@ jobs:
     
     - name: Install dependencies
       run: npm run install-all
+      
+    - name: Setup Prisma
+      run: |
+        cd server
+        npm install prisma@^5.7.1 @prisma/client@^5.7.1
+        npx prisma generate
+        
+    - name: Verify Prisma setup
+      run: |
+        cd server
+        npx prisma --version
+        npx prisma generate --schema=./prisma/schema.prisma
     
     - name: Build frontend
       run: |
