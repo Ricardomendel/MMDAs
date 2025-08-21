@@ -103,7 +103,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files from the React build directory (for production)
 if (process.env['NODE_ENV'] === 'production') {
-  app.use(express.static(path.join(__dirname, '../client/build')));
+  app.use(express.static(path.join(__dirname, '../../client/build')));
 }
 
 // Health check endpoint
@@ -145,7 +145,7 @@ app.use(errorHandler);
 // Serve React app for client-side routing (must be after API routes)
 if (process.env['NODE_ENV'] === 'production') {
   app.get('*', (_req, res) => {
-    res.sendFile(path.join(__dirname, '../client/build/index.html'));
+    res.sendFile(path.join(__dirname, '../../client/build/index.html'));
   });
 } else {
   // 404 handler for development
