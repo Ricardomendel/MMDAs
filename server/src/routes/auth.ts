@@ -20,6 +20,33 @@ const validateRegistration = [
   body('ghana_card_number').optional().isLength({ min: 10 }),
 ];
 
+// Custom validation function to bypass express-validator issues
+const customValidateLogin = (req: Request, res: Response, next: Function) => {
+  const { email, password } = req.body;
+  
+  const errors: any[] = [];
+  
+  if (!email || typeof email !== 'string') {
+    errors.push({ param: 'email', msg: 'Email is required' });
+  } else if (!email.includes('@') || !email.includes('.')) {
+    errors.push({ param: 'email', msg: 'Please provide a valid email address' });
+  }
+  
+  if (!password || typeof password !== 'string') {
+    errors.push({ param: 'password', msg: 'Password is required' });
+  }
+  
+  if (errors.length > 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors
+    });
+  }
+  
+  next();
+};
+
 const validateLogin = [
   body('email')
     .trim()
@@ -170,7 +197,7 @@ router.post('/register', validateRegistration, async (req: Request, res: Respons
 });
 
 // Login user
-router.post('/login', validateLogin, async (req: Request, res: Response) => {
+router.post('/login', customValidateLogin, async (req: Request, res: Response) => {
   try {
     // Debug: Log the request body
     logger.info('Login request body:', JSON.stringify(req.body));
