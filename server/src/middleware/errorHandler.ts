@@ -109,14 +109,14 @@ export const errorHandler = (
     message = 'Invalid reference';
   }
 
-  // Handle Knex errors
-  if (error.message?.includes('duplicate key')) {
+  // Handle Prisma errors
+  if (error.message?.includes('duplicate key') || error.message?.includes('Unique constraint')) {
     statusCode = 409;
     message = 'Duplicate entry';
-  } else if (error.message?.includes('foreign key')) {
+  } else if (error.message?.includes('foreign key') || error.message?.includes('Foreign key constraint')) {
     statusCode = 400;
     message = 'Invalid reference';
-  } else if (error.message?.includes('not null')) {
+  } else if (error.message?.includes('not null') || error.message?.includes('Required')) {
     statusCode = 400;
     message = 'Required field missing';
   }
