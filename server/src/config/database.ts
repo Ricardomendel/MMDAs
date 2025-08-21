@@ -2,16 +2,27 @@ import knex from 'knex';
 import { logger } from '../utils/logger';
 import { mockDb, connectMockDatabase } from './mockDatabase';
 
+const isProduction = process.env['NODE_ENV'] === 'production';
+const databaseUrl = process.env['DATABASE_URL'];
+
+// Prefer full DATABASE_URL when provided; fall back to discrete env vars
+const connection = databaseUrl
+  ? {
+      connectionString: databaseUrl,
+      ssl: isProduction ? { rejectUnauthorized: false } : false,
+    }
+  : {
+      host: process.env['DB_HOST'] || 'localhost',
+      port: parseInt(process.env['DB_PORT'] || '5432'),
+      user: process.env['DB_USER'] || 'postgres',
+      password: process.env['DB_PASSWORD'] || 'password',
+      database: process.env['DB_NAME'] || 'revenue_system',
+      ssl: isProduction ? { rejectUnauthorized: false } : false,
+    };
+
 const config = {
   client: 'postgresql',
-  connection: {
-    host: process.env['DB_HOST'] || process.env['DATABASE_URL']?.split('@')[1]?.split(':')[0] || 'localhost',
-    port: parseInt(process.env['DB_PORT'] || process.env['DATABASE_URL']?.split(':')[4]?.split('/')[0] || '5432'),
-    user: process.env['DB_USER'] || process.env['DATABASE_URL']?.split('://')[1]?.split(':')[0] || 'postgres',
-    password: process.env['DB_PASSWORD'] || process.env['DATABASE_URL']?.split(':')[2]?.split('@')[0] || 'password',
-    database: process.env['DB_NAME'] || process.env['DATABASE_URL']?.split('/').pop() || 'revenue_system',
-    ssl: process.env['NODE_ENV'] === 'production' ? { rejectUnauthorized: false } : false,
-  },
+  connection,
   pool: {
     min: 2,
     max: 10,
