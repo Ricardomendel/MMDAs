@@ -311,6 +311,12 @@ export const sendBulkEmail = async (emails: EmailOptions[]): Promise<void> => {
   try {
     const transporter = createTransporter();
     
+    // If no transporter available (credentials not configured), skip sending
+    if (!transporter) {
+      logger.info('Bulk email sending skipped - no SMTP credentials configured');
+      return;
+    }
+    
     for (const email of emails) {
       const template = emailTemplates[email.template];
       
@@ -347,6 +353,13 @@ export const sendBulkEmail = async (emails: EmailOptions[]): Promise<void> => {
 export const verifyEmailConfig = async (): Promise<boolean> => {
   try {
     const transporter = createTransporter();
+    
+    // If no transporter available (credentials not configured), skip verification
+    if (!transporter) {
+      logger.info('Email config verification skipped - no SMTP credentials configured');
+      return false;
+    }
+    
     await transporter.verify();
     logger.info('Email configuration verified successfully');
     return true;
