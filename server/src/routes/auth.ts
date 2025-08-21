@@ -176,6 +176,15 @@ router.post('/login', validateLogin, async (req: Request, res: Response) => {
     logger.info('Login request body:', JSON.stringify(req.body));
     logger.info('Login request headers:', JSON.stringify(req.headers));
     
+    // Check if validation middleware ran
+    if (!req.body || Object.keys(req.body).length === 0) {
+      logger.error('Request body is empty or undefined');
+      return res.status(400).json({
+        success: false,
+        message: 'Request body is required'
+      });
+    }
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       logger.error('Login validation failed. Errors:');
