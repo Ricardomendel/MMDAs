@@ -448,7 +448,8 @@ function App() {
     if (user && (user.role === 'admin' || user.role === 'super_admin') && activeView === 'users') {
       fetchUsers();
     }
-  }, [user?.role, activeView]); // Only depend on user role and activeView, not the function
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role, activeView]);
 
   // Fetch users when staff accesses dashboard (for accurate counts)
   useEffect(() => {
@@ -456,7 +457,8 @@ function App() {
       // Only fetch once when dashboard is accessed
       fetchUsers();
     }
-  }, [user?.role, activeView]); // Only depend on user role and activeView
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role, activeView]);
 
   // Fetch dashboard data when admin dashboard is accessed
   useEffect(() => {
@@ -466,7 +468,8 @@ function App() {
       fetchProperties();
       fetchRecentActivities();
     }
-  }, [user?.role, activeView]); // Only depend on user role and activeView, not the functions
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role, activeView]);
 
   // Fetch dashboard data when staff dashboard is accessed
   useEffect(() => {
@@ -476,7 +479,7 @@ function App() {
       fetchUsers();
       fetchRecentActivities();
     }
-  }, [user?.role, activeView]); // Only depend on user role and activeView, not the functions
+  }, [user?.role, activeView]);
 
   const handleUpdateUser = async (userData: any, id?: string) => {
     if (!id) {
