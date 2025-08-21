@@ -2,13 +2,16 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { body, validationResult } from 'express-validator';
-import { db, mockDb } from '../config/database';
+import { db, mockDb, hasValidDatabaseConfig } from '../config/database';
 import { setSession, deleteSession } from '../config/redis';
 import { logger, logUserAction, logSecurity } from '../utils/logger';
 import { sendEmail } from '../utils/email';
 import { sendSMS } from '../utils/sms';
 
 const router = Router();
+
+// Determine once per process whether a real DB is configured
+const useRealDatabase = hasValidDatabaseConfig();
 
 // Validation middleware (kept for reference, not used)
 // const validateRegistration = [
@@ -130,15 +133,19 @@ router.post('/register', customValidateRegistration, async (req: Request, res: R
     const email = String(rawEmail || '').trim().toLowerCase();
     const phone = String(rawPhone || '').replace(/\s+/g, '');
 
-    // Check if user already exists - try real database first, fall back to mock
+    // Check if user already exists
     let existingUser;
-    try {
-      existingUser = await db('users')
-        .where('email', email)
-        .orWhere('phone', phone)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
+    if (useRealDatabase) {
+      try {
+        existingUser = await db('users')
+          .where('email', email)
+          .orWhere('phone', phone)
+          .first();
+      } catch (dbError) {
+        logger.warn('Database query failed, using mock database:', dbError);
+        existingUser = mockDb.users.where('email', email).first() || mockDb.users.where('phone', phone).first();
+      }
+    } else {
       existingUser = mockDb.users.where('email', email).first() || mockDb.users.where('phone', phone).first();
     }
 
@@ -153,32 +160,55 @@ router.post('/register', customValidateRegistration, async (req: Request, res: R
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Create user - try real database first, fall back to mock
+    // Create user
     let user;
-    try {
-      const [newUser] = await db('users')
-        .insert({
-          email,
-          phone,
-          password_hash: passwordHash,
-          first_name,
-          last_name,
-          middle_name,
-          ghana_card_number,
-          date_of_birth,
-          gender,
-          address,
-          city,
-          region,
-          postal_code,
-          role: 'taxpayer',
-          status: 'pending'
-        })
-        .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status']);
-      user = newUser;
-    } catch (dbError) {
-      logger.warn('Database insert failed, using mock database:', dbError);
-      // Create user in mock database and mark active for testing
+    if (useRealDatabase) {
+      try {
+        const [newUser] = await db('users')
+          .insert({
+            email,
+            phone,
+            password_hash: passwordHash,
+            first_name,
+            last_name,
+            middle_name,
+            ghana_card_number,
+            date_of_birth,
+            gender,
+            address,
+            city,
+            region,
+            postal_code,
+            role: 'taxpayer',
+            status: 'pending'
+          })
+          .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status']);
+        user = newUser;
+      } catch (dbError) {
+        logger.warn('Database insert failed, using mock database:', dbError);
+        const [createdUser] = mockDb.users
+          .insert({
+            email,
+            phone,
+            password_hash: passwordHash,
+            first_name,
+            last_name,
+            middle_name,
+            ghana_card_number,
+            date_of_birth,
+            gender,
+            address,
+            city,
+            region,
+            postal_code,
+            role: 'taxpayer',
+            status: 'active',
+            email_verified: true
+          })
+          .returning(['id', 'email', 'first_name', 'last_name', 'role', 'status']);
+        user = createdUser;
+      }
+    } else {
       const [createdUser] = mockDb.users
         .insert({
           email,
@@ -274,14 +304,18 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
     const { email, password } = req.body;
     logger.info('Login attempt for email:', email);
 
-    // Find user - try real database first, fall back to mock
+    // Find user
     let user;
-    try {
-      user = await db('users')
-        .where('email', email)
-        .first();
-    } catch (dbError) {
-      logger.warn('Database query failed, using mock database:', dbError);
+    if (useRealDatabase) {
+      try {
+        user = await db('users')
+          .where('email', email)
+          .first();
+      } catch (dbError) {
+        logger.warn('Database query failed, using mock database:', dbError);
+        user = mockDb.users.where('email', email).first();
+      }
+    } else {
       user = mockDb.users.where('email', email).first();
     }
 
@@ -310,15 +344,22 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
       
       if (loginAttempts >= maxAttempts) {
         const lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
-        try {
-          await db('users')
-            .where('id', user.id)
-            .update({
+        if (useRealDatabase) {
+          try {
+            await db('users')
+              .where('id', user.id)
+              .update({
+                login_attempts: loginAttempts,
+                locked_until: lockUntil
+              });
+          } catch (dbError) {
+            logger.warn('Database update failed, using mock database:', dbError);
+            mockDb.users.where('id', user.id).update({
               login_attempts: loginAttempts,
               locked_until: lockUntil
             });
-        } catch (dbError) {
-          logger.warn('Database update failed, using mock database:', dbError);
+          }
+        } else {
           mockDb.users.where('id', user.id).update({
             login_attempts: loginAttempts,
             locked_until: lockUntil
@@ -331,12 +372,16 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
           message: 'Account locked due to multiple failed login attempts. Please try again in 30 minutes.'
         });
       } else {
-        try {
-          await db('users')
-            .where('id', user.id)
-            .update({ login_attempts: loginAttempts });
-        } catch (dbError) {
-          logger.warn('Database update failed, using mock database:', dbError);
+        if (useRealDatabase) {
+          try {
+            await db('users')
+              .where('id', user.id)
+              .update({ login_attempts: loginAttempts });
+          } catch (dbError) {
+            logger.warn('Database update failed, using mock database:', dbError);
+            mockDb.users.where('id', user.id).update({ login_attempts: loginAttempts });
+          }
+        } else {
           mockDb.users.where('id', user.id).update({ login_attempts: loginAttempts });
         }
       }
@@ -357,17 +402,26 @@ router.post('/login', customValidateLogin, async (req: Request, res: Response) =
     }
 
     // Reset login attempts
-    try {
-      await db('users')
-        .where('id', user.id)
-        .update({
+    if (useRealDatabase) {
+      try {
+        await db('users')
+          .where('id', user.id)
+          .update({
+            login_attempts: 0,
+            locked_until: null,
+            last_login_at: new Date(),
+            last_login_ip: req.ip
+          });
+      } catch (dbError) {
+        logger.warn('Database update failed, using mock database:', dbError);
+        mockDb.users.where('id', user.id).update({
           login_attempts: 0,
           locked_until: null,
           last_login_at: new Date(),
           last_login_ip: req.ip
         });
-    } catch (dbError) {
-      logger.warn('Database update failed, using mock database:', dbError);
+      }
+    } else {
       mockDb.users.where('id', user.id).update({
         login_attempts: 0,
         locked_until: null,
