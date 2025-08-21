@@ -21,8 +21,15 @@ const validateRegistration = [
 ];
 
 const validateLogin = [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty(),
+  body('email')
+    .trim()
+    .isEmail()
+    .withMessage('Please provide a valid email address')
+    .normalizeEmail(),
+  body('password')
+    .trim()
+    .notEmpty()
+    .withMessage('Password is required'),
 ];
 
 const validatePasswordReset = [
@@ -165,11 +172,16 @@ router.post('/register', validateRegistration, async (req: Request, res: Respons
 // Login user
 router.post('/login', validateLogin, async (req: Request, res: Response) => {
   try {
+    // Debug: Log the request body
+    logger.info('Login request body:', JSON.stringify(req.body));
+    logger.info('Login request headers:', JSON.stringify(req.headers));
+    
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       logger.error('Login validation failed. Errors:');
+      logger.error('Raw validation errors:', JSON.stringify(errors.array()));
       errors.array().forEach((error: any) => {
-        logger.error(`- ${error.param}: ${error.msg}`);
+        logger.error(`- ${error.param || 'unknown'}: ${error.msg || 'Invalid value'}`);
       });
       return res.status(400).json({
         success: false,

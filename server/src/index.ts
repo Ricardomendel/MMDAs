@@ -122,7 +122,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // API routes
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', authRoutes); // Temporarily removed authLimiter to debug validation
 app.use('/api/users', authMiddleware, userRoutes);
 app.use('/api/revenue', authMiddleware, revenueRoutes);
 app.use('/api/payments', authMiddleware, paymentRoutes);
