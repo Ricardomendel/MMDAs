@@ -10,15 +10,52 @@ import { sendSMS } from '../utils/sms';
 
 const router = Router();
 
-// Validation middleware
-const validateRegistration = [
-  body('email').isEmail().normalizeEmail(),
-  body('phone').isMobilePhone('en-GH'),
-  body('password').isLength({ min: 8 }),
-  body('first_name').trim().isLength({ min: 2 }),
-  body('last_name').trim().isLength({ min: 2 }),
-  body('ghana_card_number').optional().isLength({ min: 10 }),
-];
+// Validation middleware (kept for reference, not used)
+// const validateRegistration = [
+//   body('email').isEmail().normalizeEmail(),
+//   body('phone').isMobilePhone('en-GH'),
+//   body('password').isLength({ min: 8 }),
+//   body('first_name').trim().isLength({ min: 2 }),
+//   body('last_name').trim().isLength({ min: 2 }),
+//   body('ghana_card_number').optional().isLength({ min: 10 }),
+// ];
+
+// Custom registration validation to avoid env-specific validator issues
+const customValidateRegistration = (req: Request, res: Response, next: Function) => {
+  const { email, phone, password, first_name, last_name } = req.body || {};
+
+  const errors: Array<{ param: string; msg: string }> = [];
+
+  const emailStr = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!emailStr || !emailStr.includes('@') || !emailStr.includes('.')) {
+    errors.push({ param: 'email', msg: 'Please provide a valid email address' });
+  }
+
+  const phoneStr = typeof phone === 'string' ? phone.replace(/\s+/g, '') : '';
+  if (!phoneStr || !/^\+?\d{9,15}$/.test(phoneStr)) {
+    errors.push({ param: 'phone', msg: 'Please provide a valid phone number' });
+  }
+
+  const passwordStr = typeof password === 'string' ? password : '';
+  if (!passwordStr || passwordStr.length < 8) {
+    errors.push({ param: 'password', msg: 'Password must be at least 8 characters' });
+  }
+
+  const firstNameStr = typeof first_name === 'string' ? first_name.trim() : '';
+  const lastNameStr = typeof last_name === 'string' ? last_name.trim() : '';
+  if (!firstNameStr || firstNameStr.length < 2) {
+    errors.push({ param: 'first_name', msg: 'First name must be at least 2 characters' });
+  }
+  if (!lastNameStr || lastNameStr.length < 2) {
+    errors.push({ param: 'last_name', msg: 'Last name must be at least 2 characters' });
+  }
+
+  if (errors.length > 0) {
+    return res.status(400).json({ success: false, message: 'Validation failed', errors });
+  }
+  next();
+  return;
+};
 
 // Custom validation function to bypass express-validator issues
 const customValidateLogin = (req: Request, res: Response, next: Function) => {
@@ -72,20 +109,11 @@ const validatePasswordReset = [
 // ];
 
 // Register new user
-router.post('/register', validateRegistration, async (req: Request, res: Response) => {
+router.post('/register', customValidateRegistration, async (req: Request, res: Response) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array()
-      });
-    }
-
     const {
-      email,
-      phone,
+      email: rawEmail,
+      phone: rawPhone,
       password,
       first_name,
       last_name,
@@ -98,6 +126,9 @@ router.post('/register', validateRegistration, async (req: Request, res: Respons
       region,
       postal_code
     } = req.body;
+
+    const email = String(rawEmail || '').trim().toLowerCase();
+    const phone = String(rawPhone || '').replace(/\s+/g, '');
 
     // Check if user already exists - try real database first, fall back to mock
     let existingUser;
