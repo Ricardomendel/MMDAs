@@ -1,4 +1,5 @@
 import express from 'express';
+import type { Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -107,7 +108,7 @@ if (process.env['NODE_ENV'] === 'production') {
 }
 
 // Health check endpoint
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
@@ -144,12 +145,12 @@ app.use(errorHandler);
 
 // Serve React app for client-side routing (must be after API routes)
 if (process.env['NODE_ENV'] === 'production') {
-  app.get('*', (_req, res) => {
+  app.get('*', (_req: Request, res: Response) => {
     res.sendFile(path.join(__dirname, '../../client/build/index.html'));
   });
 } else {
   // 404 handler for development
-  app.use('*', (req, res) => {
+  app.use('*', (req: Request, res: Response) => {
     res.status(404).json({
       success: false,
       message: 'Route not found',
