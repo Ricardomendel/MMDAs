@@ -41,6 +41,9 @@ const io = new Server(server, {
 
 const PORT = process.env['PORT'] || 5000;
 
+// Trust proxy for rate limiting behind load balancers (Render, etc.)
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
